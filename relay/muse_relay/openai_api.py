@@ -26,6 +26,8 @@ def _content_text(content) -> str:
 
 def extract_prompt(body: dict) -> str:
     """The last user message's text: Muse keeps its own history."""
+    if not isinstance(body, dict):
+        raise BadRequest("body must be a JSON object")
     messages = body.get("messages")
     if not isinstance(messages, list):
         raise BadRequest("messages missing")
@@ -91,6 +93,17 @@ def redact_headers(headers) -> dict:
 COMPLETION_PATHS = ("/v1/chat/completions", "/chat/completions")
 MODELS_PATHS = ("/v1/models", "/models")
 MODEL_ID = "muse"
+MAX_BODY = 64 * 1024          # bytes; the relay may face the internet
+MIN_TOKEN_LEN = 32
+IDLE_TIMEOUT_S = 30
+
+
+class BodyError(Exception):
+    """An unreadable request body; carries the HTTP status to answer with."""
+
+    def __init__(self, status: int, message: str) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 def save_capture(capture_dir: Path, method: str, path: str, headers, raw: bytes) -> None:
@@ -102,13 +115,48 @@ def save_capture(capture_dir: Path, method: str, path: str, headers, raw: bytes)
                                                encoding="utf-8")
 
 
+def read_chunked(rfile, limit: int = MAX_BODY) -> bytes:
+    """Decodes a chunked body; trailers are skipped."""
+    out = bytearray()
+    while True:
+        size_line = rfile.readline(64).split(b";", 1)[0].strip()
+        try:
+            size = int(size_line, 16)
+        except ValueError:
+            raise BodyError(400, "bad chunk size")
+        if size == 0:
+            while rfile.readline(8192).strip():
+                pass
+            return bytes(out)
+        if len(out) + size > limit:
+            raise BodyError(413, "body too large")
+        out += rfile.read(size)
+        rfile.readline(8)          # the CRLF after the data
+
+
 def make_handler(turns, token: str, capture_dir: Optional[Path] = None):
+    if len(token) < MIN_TOKEN_LEN:
+        raise ValueError(f"token must be at least {MIN_TOKEN_LEN} characters")
+
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
+        timeout = IDLE_TIMEOUT_S
 
         def _read_body(self) -> bytes:
-            length = int(self.headers.get("Content-Length") or 0)
-            return self.rfile.read(length) if length > 0 else b""
+            if "chunked" in self.headers.get("Transfer-Encoding", "").lower():
+                return read_chunked(self.rfile)
+            raw_length = self.headers.get("Content-Length")
+            if raw_length is None:
+                return b""
+            try:
+                length = int(raw_length)
+            except ValueError:
+                raise BodyError(400, "bad Content-Length")
+            if length < 0:
+                raise BodyError(400, "bad Content-Length")
+            if length > MAX_BODY:
+                raise BodyError(413, "body too large")
+            return self.rfile.read(length)
 
         def _send(self, status: int, ctype: str, payload: bytes) -> None:
             self.send_response(status)
@@ -121,32 +169,43 @@ def make_handler(turns, token: str, capture_dir: Optional[Path] = None):
             self._send(status, "application/json; charset=utf-8",
                        json.dumps(obj, ensure_ascii=False).encode("utf-8"))
 
+        def _reject(self, status: int, message: str) -> None:
+            """Answers without reading the body, so the connection can't be reused."""
+            self.close_connection = True
+            self._send_json(status, {"error": {"message": message}})
+
         def _authorized(self) -> bool:
             return check_auth(self.headers.get("Authorization", ""), token)
 
+        def _capture(self, method: str, path: str, raw: bytes) -> None:
+            if capture_dir is not None:
+                save_capture(capture_dir, method, path, self.headers, raw)
+
         def do_GET(self) -> None:
             path = self.path.split("?", 1)[0]
-            if capture_dir is not None:
-                save_capture(capture_dir, "GET", path, self.headers, b"")
             if path not in MODELS_PATHS:
-                self._send_json(404, {"error": {"message": "not found"}})
+                self._reject(404, "not found")
             elif not self._authorized():
-                self._send_json(401, {"error": {"message": "unauthorized"}})
+                self._reject(401, "unauthorized")
             else:
+                self._capture("GET", path, b"")
                 self._send_json(200, {"object": "list", "data": [
                     {"id": MODEL_ID, "object": "model", "created": 0, "owned_by": "muse-relay"}]})
 
         def do_POST(self) -> None:
             path = self.path.split("?", 1)[0]
-            raw = self._read_body()
-            if capture_dir is not None:
-                save_capture(capture_dir, "POST", path, self.headers, raw)
             if path not in COMPLETION_PATHS:
-                self._send_json(404, {"error": {"message": "not found"}})
+                self._reject(404, "not found")
                 return
             if not self._authorized():
-                self._send_json(401, {"error": {"message": "unauthorized"}})
+                self._reject(401, "unauthorized")
                 return
+            try:
+                raw = self._read_body()
+            except BodyError as e:
+                self._reject(e.status, str(e))
+                return
+            self._capture("POST", path, raw)
             try:
                 body = json.loads(raw)
                 prompt = extract_prompt(body)

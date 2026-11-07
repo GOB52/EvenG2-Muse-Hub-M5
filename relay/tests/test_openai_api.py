@@ -82,7 +82,9 @@ import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 
-from muse_relay.openai_api import make_handler
+import socket
+
+from muse_relay.openai_api import MAX_BODY, make_handler
 
 TOKEN = "x" * 40
 
@@ -97,14 +99,28 @@ class FakeTurns:
         return self.reply
 
 
+def _raw(url, request: bytes) -> bytes:
+    port = int(url.rsplit(":", 1)[1])
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
+        sock.sendall(request)
+        data = b""
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+        return data
+
+
 @pytest.fixture
 def server(tmp_path):
     turns = FakeTurns()
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(turns, TOKEN, tmp_path / "captures"))
-    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
     t.start()
     yield f"http://127.0.0.1:{httpd.server_address[1]}", turns, tmp_path / "captures"
     httpd.shutdown()
+    httpd.server_close()
 
 
 def _post(url, body, token=TOKEN, path="/v1/chat/completions"):
@@ -184,3 +200,73 @@ def test_capture_saves_request_without_token(server):
     rec = json.loads(saved)
     assert rec["method"] == "POST" and rec["path"] == "/v1/chat/completions"
     assert json.loads(rec["body"])["messages"][0]["content"] == "こんにちは"
+
+
+def test_unauthorized_or_unknown_requests_are_not_captured(server):
+    url, _, captures = server
+    _post(url, USER, token="nope")
+    _post(url, USER, path="/v1/other")
+    assert not captures.exists() or list(captures.glob("*.json")) == []
+
+
+def test_oversized_content_length_is_413_without_reading(server):
+    url, turns, captures = server
+    head = (f"POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {TOKEN}\r\n"
+            f"Content-Length: {MAX_BODY + 1}\r\n\r\n").encode()
+    port = int(url.rsplit(":", 1)[1])
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
+        sock.sendall(head)
+        resp = sock.recv(4096)
+        assert resp.startswith(b"HTTP/1.1 413")
+        assert sock.recv(4096) == b""      # connection closed by the server
+    assert turns.asked == []
+
+
+def test_non_numeric_content_length_is_400(server):
+    url, _, _ = server
+    req = (f"POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {TOKEN}\r\n"
+           "Content-Length: abc\r\n\r\n").encode()
+    assert _raw(url, req).startswith(b"HTTP/1.1 400")
+
+
+@pytest.mark.parametrize("payload", [b"[]", b'"x"', b"123"])
+def test_non_object_json_is_400(server, payload):
+    url, _, _ = server
+    req = (f"POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {TOKEN}\r\n"
+           f"Content-Length: {len(payload)}\r\nConnection: close\r\n\r\n").encode() + payload
+    assert _raw(url, req).startswith(b"HTTP/1.1 400")
+
+
+def test_chunked_body_is_decoded(server):
+    url, turns, _ = server
+    body = json.dumps(USER, ensure_ascii=False).encode("utf-8")
+    mid = len(body) // 2
+    chunked = b"".join(b"%x\r\n%s\r\n" % (len(c), c) for c in (body[:mid], body[mid:])) + b"0\r\nX-T: 1\r\n\r\n"
+    req = (f"POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {TOKEN}\r\n"
+           "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n").encode() + chunked
+    resp = _raw(url, req)
+    assert resp.startswith(b"HTTP/1.1 200")
+    assert turns.asked == ["こんにちは"]
+
+
+def test_oversized_chunked_body_is_413(server):
+    url, turns, _ = server
+    big = b"a" * (MAX_BODY + 1)
+    chunked = b"%x\r\n%s\r\n0\r\n\r\n" % (len(big), big)
+    req = (f"POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {TOKEN}\r\n"
+           "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n").encode() + chunked
+    assert _raw(url, req).startswith(b"HTTP/1.1 413")
+    assert turns.asked == []
+
+
+def test_post_without_length_or_chunked_is_400(server):
+    url, _, _ = server
+    req = (f"POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {TOKEN}\r\n"
+           "Connection: close\r\n\r\n").encode()
+    assert _raw(url, req).startswith(b"HTTP/1.1 400")
+
+
+@pytest.mark.parametrize("token", ["", "short", "x" * 31])
+def test_short_token_is_refused(token):
+    with pytest.raises(ValueError):
+        make_handler(FakeTurns(), token)
