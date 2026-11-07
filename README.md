@@ -193,6 +193,10 @@ Even 側の Endpoint は、LAN なら `http://<Mac の LAN IP>:8787/v1/chat/comp
 をそのまま使う。sdkconfig は SDK の `sdkconfig.defaults` → `devices/sdkconfig.muse` →
 `devices/sdkconfig.muse-m5stack-sticks3` → `hub/sdkconfig.hub` → `hub/sdkconfig.local` の順に重ねる。
 
+ファームのバージョンは `999.0.0+hub.<hub のバージョン>` (例: `999.0.0+hub.0.0.1`、`hub/CMakeLists.txt` の `PROJECT_VER`)。
+Muse のボードは OTA が有効で、`MAJOR.MINOR.PATCH` が新しいイメージだけを入れるため、SDK と同じ `999.0.0` を前に残して
+公式の Muse ファームで hub が上書きされないようにしている。`+hub.` の後ろが hub (この repo の tag) のバージョン。
+
 ライセンス:
 
 - この repo は MIT ([`LICENSE`](LICENSE))。
