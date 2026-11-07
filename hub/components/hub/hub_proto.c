@@ -345,6 +345,189 @@ size_t hub_proto_page_cut(const char *text, const size_t room)
     return text[bytes] && best ? best : bytes;
 }
 
+const char HUB_UNKNOWN_WIDGET[] = "(Muse アプリに表示: 選択肢など)";
+
+#define SHOWN_HEAD "(Muse アプリに表示: "
+#define SHOWN_TAIL ")"
+#define WIDGET_LABEL "ウィジェット"
+#define IMAGE_OPTIONS_LABEL "画像の選択肢"
+#define ITEM_MARK "・"
+#define SUBTITLE_SEP " — "
+#define MARKER_HEAD "[[hatch_widget:"
+#define MARKER_TAIL "]]"
+
+/* Appends n bytes of src (at most what fits), never ending inside a UTF-8 character. */
+static void append_bytes(char *out, const size_t cap, const char *src, const size_t n)
+{
+    const size_t used = strlen(out);
+    const size_t room = used + 1 < cap ? cap - used - 1 : 0;
+    const size_t take = n < room ? n : room;
+    memcpy(out + used, src, take);
+    out[used + take] = '\0';
+    hub_proto_utf8_trim(out);
+}
+
+static void append_str(char *out, const size_t cap, const char *src)
+{
+    append_bytes(out, cap, src, strlen(src));
+}
+
+/* Appends src's first n bytes without "**", each run of spaces as one space, trimmed. Returns the bytes added. */
+static size_t append_clean(char *out, const size_t cap, const char *src, const size_t n)
+{
+    const size_t start = strlen(out);
+    size_t used = start;
+    bool space = false;
+    for (size_t i = 0; i < n && src[i] && used + 2 < cap; i++) {
+        if (src[i] == '*' && i + 1 < n && src[i + 1] == '*') {
+            i++;
+            continue;
+        }
+        if (is_space(src[i])) {
+            space = used > start;
+            continue;
+        }
+        if (space) {
+            out[used++] = ' ';
+            space = false;
+        }
+        out[used++] = src[i];
+    }
+    out[used] = '\0';
+    hub_proto_utf8_trim(out);
+    return strlen(out) - start;
+}
+
+/* prefix + src (cleaned) + suffix; out stays as it was when src shows nothing. */
+static bool append_part(char *out, const size_t cap, const char *prefix, const char *src, const char *suffix)
+{
+    const size_t was = strlen(out);
+    append_str(out, cap, prefix);
+    if (append_clean(out, cap, src, strlen(src)) == 0) {
+        out[was] = '\0';
+        return false;
+    }
+    append_str(out, cap, suffix);
+    return true;
+}
+
+static const char *json_str(const cJSON *obj, const char *key)
+{
+    const cJSON *v = cJSON_IsObject(obj) ? cJSON_GetObjectItemCaseSensitive(obj, key) : NULL;
+    return cJSON_IsString(v) ? v->valuestring : "";
+}
+
+static const cJSON *json_obj(const cJSON *obj, const char *key)
+{
+    const cJSON *v = cJSON_IsObject(obj) ? cJSON_GetObjectItemCaseSensitive(obj, key) : NULL;
+    return cJSON_IsObject(v) ? v : NULL;
+}
+
+static const cJSON *json_array(const cJSON *obj, const char *key)
+{
+    const cJSON *v = cJSON_IsObject(obj) ? cJSON_GetObjectItemCaseSensitive(obj, key) : NULL;
+    return cJSON_IsArray(v) ? v : NULL;
+}
+
+/* "・title — subtitle (tertiary_title)" on a line of its own; nothing for an item without a title. */
+static void append_item(char *out, const size_t cap, const cJSON *item)
+{
+    if (!append_part(out, cap, out[0] ? "\n" ITEM_MARK : ITEM_MARK, json_str(item, "title"), "")) {
+        return;
+    }
+    append_part(out, cap, SUBTITLE_SEP, json_str(item, "subtitle"), "");
+    append_part(out, cap, " (", json_str(item, "tertiary_title"), ")");
+}
+
+/* title (else display's first line), then a line per item (only the "marker" ones if markers_only). */
+static void render_list(char *out, const size_t cap, const char *title, const char *display, const cJSON *items,
+                        const bool markers_only)
+{
+    if (append_clean(out, cap, title, strlen(title)) == 0) {
+        append_clean(out, cap, display, strcspn(display, "\n"));
+    }
+    const cJSON *item = NULL;
+    cJSON_ArrayForEach(item, items) {
+        if (!markers_only || strcmp(json_str(item, "kind"), "marker") == 0) {
+            append_item(out, cap, item);
+        }
+    }
+}
+
+static void render_shown_note(char *out, const size_t cap, const char *kind, const char *display,
+                              const char *fallback)
+{
+    snprintf(out, cap, "%s", SHOWN_HEAD);
+    hub_proto_utf8_trim(out);
+    if (!append_clean(out, cap, display, strlen(display)) && !append_clean(out, cap, fallback, strlen(fallback))) {
+        append_str(out, cap, strcmp(kind, "image_options") == 0 ? IMAGE_OPTIONS_LABEL : WIDGET_LABEL);
+    }
+    append_str(out, cap, SHOWN_TAIL);
+}
+
+void hub_proto_render_presentation(const char *json, char *out, const size_t cap)
+{
+    if (cap == 0) {
+        return;
+    }
+    out[0] = '\0';
+    cJSON *root = cJSON_ParseWithOpts(json, NULL, true);
+    const char *kind = json_str(root, "kind");
+    const char *display = json_str(root, "display_text");
+    const cJSON *data = json_obj(root, "data");
+    if (strcmp(kind, "generic_list") == 0) {
+        render_list(out, cap, json_str(data, "title"), display, json_array(data, "items"), false);
+    } else if (strcmp(kind, "local_map") == 0) {
+        render_list(out, cap, "", display, json_array(json_obj(data, "typed_data"), "elements"), true);
+    }
+    if (!out[0]) {
+        render_shown_note(out, cap, kind, display, json_str(root, "fallback_text"));
+    }
+    cJSON_Delete(root);
+}
+
+/* The widget a marker at text names, rendered at the end of out; false if text has no whole marker. */
+static bool replace_marker(const char *text, const char **after, const hub_widget_lookup_t lookup, void *ctx,
+                           char *out, const size_t cap)
+{
+    const char *id = text + sizeof(MARKER_HEAD) - 1;
+    const char *end = strstr(id, MARKER_TAIL);
+    const size_t n = end ? (size_t)(end - id) : 0;
+    if (n == 0 || n >= HUB_WIDGET_ID_MAX) {
+        return false;
+    }
+    char key[HUB_WIDGET_ID_MAX];
+    memcpy(key, id, n);
+    key[n] = '\0';
+    const char *json = lookup(key, ctx);
+    const size_t used = strlen(out);
+    if (json) {
+        hub_proto_render_presentation(json, out + used, cap - used);
+    } else {
+        append_str(out, cap, HUB_UNKNOWN_WIDGET);
+    }
+    *after = end + sizeof(MARKER_TAIL) - 1;
+    return true;
+}
+
+void hub_proto_replace_widget_markers(const char *text, const hub_widget_lookup_t lookup, void *ctx, char *out,
+                                      const size_t cap)
+{
+    if (cap == 0) {
+        return;
+    }
+    out[0] = '\0';
+    const char *p = text;
+    for (const char *m = strstr(p, MARKER_HEAD); m; m = strstr(p, MARKER_HEAD)) {
+        append_bytes(out, cap, p, (size_t)(m - p));
+        if (!replace_marker(m, &p, lookup, ctx, out, cap)) {
+            append_str(out, cap, MARKER_HEAD);
+            p = m + sizeof(MARKER_HEAD) - 1;
+        }
+    }
+    append_str(out, cap, p);
+}
+
 static cJSON *chunk_base(const char *object, const char *model, const long created, const char *id)
 {
     cJSON *root = cJSON_CreateObject();

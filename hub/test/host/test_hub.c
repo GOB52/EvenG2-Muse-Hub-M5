@@ -173,6 +173,114 @@ static void test_completion_sse(void)
     hub_proto_free(s);
 }
 
+/* The widgets seen on the device, as the SDK forwards them (the HTML dropped). */
+static const char WIDGET_LIST[] =
+    "{\"id\":\"widget-0ed9\",\"kind\":\"generic_list\","
+    "\"display_text\":\"**リスト型の見本：ウィジェットの種類一覧**\\n- 選択肢型\\n- 地図型\\n- リスト型\","
+    "\"data\":{\"title\":\"リスト型の見本：ウィジェットの種類一覧\",\"items\":["
+    "{\"title\":\"選択肢型\",\"subtitle\":\"タップで返信になるボタン\",\"tertiary_title\":\"任意\","
+    "\"type\":\"generic\",\"data\":{},\"icons\":[]},"
+    "{\"title\":\"地図型\",\"subtitle\":\"\",\"type\":\"generic\",\"data\":{},\"icons\":[]},"
+    "{\"title\":\"リスト型\",\"subtitle\":\"項目の一覧\",\"type\":\"generic\",\"data\":{},\"icons\":[]}]}}";
+static const char WIDGET_LIST_TEXT[] =
+    "リスト型の見本：ウィジェットの種類一覧\n"
+    "・選択肢型 — タップで返信になるボタン (任意)\n"
+    "・地図型\n"
+    "・リスト型 — 項目の一覧";
+static const char WIDGET_MAP[] =
+    "{\"id\":\"widget-e172\",\"kind\":\"local_map\",\"display_text\":\"地図型の見本：アイーナとパシフィコ横浜\","
+    "\"data\":{\"typed_data\":{\"kind\":\"local_map\",\"elements\":["
+    "{\"kind\":\"marker\",\"title\":\"アイーナ（NTいわて会場）\",\"subtitle\":\"明日11/8 12:00〜16:00\","
+    "\"coordinate\":{\"latitude\":39.7017,\"longitude\":141.1365}},"
+    "{\"kind\":\"route\",\"title\":\"経路\"},"
+    "{\"kind\":\"marker\",\"title\":\"パシフィコ横浜\",\"subtitle\":\"11/9 10:00〜17:00\","
+    "\"coordinate\":{\"latitude\":35.4575,\"longitude\":139.6375}}]}}}";
+static const char WIDGET_MAP_TEXT[] =
+    "地図型の見本：アイーナとパシフィコ横浜\n"
+    "・アイーナ（NTいわて会場） — 明日11/8 12:00〜16:00\n"
+    "・パシフィコ横浜 — 11/9 10:00〜17:00";
+static const char WIDGET_HTML[] =
+    "{\"id\":\"widget-3572\",\"kind\":\"html\",\"fallback_text\":\"サイコロ見本ウィジェット\","
+    "\"data\":{\"fallback_text\":\"サイコロ見本ウィジェット\"}}";
+static const char WIDGET_IMAGES[] =
+    "{\"id\":\"widget-ce86\",\"kind\":\"image_options\",\"display_text\":\"Choose from ⁨4⁩ image options\","
+    "\"data\":{\"images\":[{\"path\":\"a.png\"},{\"path\":\"b.png\"},{\"path\":\"c.png\"},{\"path\":\"d.png\"}],"
+    "\"multi_select\":false}}";
+
+static bool rendered_as(const char *json, const char *want)
+{
+    char out[1024];
+    hub_proto_render_presentation(json, out, sizeof(out));
+    if (strcmp(out, want) != 0) {
+        fprintf(stderr, "rendered: [%s]\n", out);
+        return false;
+    }
+    return true;
+}
+
+static void test_render_list_and_map(void)
+{
+    CHECK(rendered_as(WIDGET_LIST, WIDGET_LIST_TEXT));
+    CHECK(rendered_as(WIDGET_MAP, WIDGET_MAP_TEXT));
+    /* no data.title: the first line of display_text; an item without a title is skipped */
+    CHECK(rendered_as("{\"kind\":\"generic_list\",\"display_text\":\"**見出し**\\n- a\","
+                      "\"data\":{\"items\":[{\"title\":\" a \\n b \"},{\"subtitle\":\"x\"},"
+                      "{\"title\":\"c\",\"tertiary_title\":\"t\"}]}}",
+                      "見出し\n・a b\n・c (t)"));
+}
+
+static void test_render_other_kinds_as_a_note(void)
+{
+    CHECK(rendered_as(WIDGET_HTML, "(Muse アプリに表示: サイコロ見本ウィジェット)"));
+    CHECK(rendered_as(WIDGET_IMAGES, "(Muse アプリに表示: Choose from ⁨4⁩ image options)"));
+    CHECK(rendered_as("{\"kind\":\"image_options\"}", "(Muse アプリに表示: 画像の選択肢)"));
+    CHECK(rendered_as("{\"kind\":\"weather\",\"display_text\":\"**晴れ**\\n\\n 22℃ \"}",
+                      "(Muse アプリに表示: 晴れ 22℃)"));
+    CHECK(rendered_as("{\"kind\":\"generic_list\",\"data\":{\"items\":[]}}", "(Muse アプリに表示: ウィジェット)"));
+    CHECK(rendered_as("not json", "(Muse アプリに表示: ウィジェット)"));
+    CHECK(rendered_as("{\"kind\":\"html\"} x", "(Muse アプリに表示: ウィジェット)"));
+    CHECK(rendered_as("", "(Muse アプリに表示: ウィジェット)"));
+    CHECK(rendered_as("[1]", "(Muse アプリに表示: ウィジェット)"));
+}
+
+static void test_render_stays_in_the_buffer(void)
+{
+    char out[20];
+    hub_proto_render_presentation(WIDGET_LIST, out, sizeof(out));
+    CHECK(strlen(out) < sizeof(out));
+    CHECK(strncmp(out, "リスト型", strlen(out) < 12 ? strlen(out) : 12) == 0);
+    hub_proto_render_presentation(WIDGET_HTML, out, sizeof(out));
+    CHECK(strlen(out) < sizeof(out));
+}
+
+static const char *lookup_widget_a(const char *id, void *ctx)
+{
+    (*(int *)ctx)++;
+    return strcmp(id, "widget-A") == 0 ? WIDGET_HTML : NULL;
+}
+
+static void test_replace_widget_markers(void)
+{
+    char out[512];
+    int calls = 0;
+    hub_proto_replace_widget_markers("見本です。\n\n[[hatch_widget:widget-A]]\n[[hatch_widget:widget-B]]終わり",
+                                     lookup_widget_a, &calls, out, sizeof(out));
+    CHECK(strcmp(out, "見本です。\n\n(Muse アプリに表示: サイコロ見本ウィジェット)\n"
+                      "(Muse アプリに表示: 選択肢など)終わり") == 0);
+    CHECK(calls == 2);
+    CHECK(strcmp(HUB_UNKNOWN_WIDGET, "(Muse アプリに表示: 選択肢など)") == 0);
+    hub_proto_replace_widget_markers("a [[hatch_widget:]] b [[hatch_widget:widget-A", lookup_widget_a, &calls,
+                                     out, sizeof(out));
+    CHECK(strcmp(out, "a [[hatch_widget:]] b [[hatch_widget:widget-A") == 0);
+    CHECK(calls == 2);
+    hub_proto_replace_widget_markers("テキストだけ", lookup_widget_a, &calls, out, sizeof(out));
+    CHECK(strcmp(out, "テキストだけ") == 0);
+    char small[16];
+    hub_proto_replace_widget_markers("あいう[[hatch_widget:widget-A]]", lookup_widget_a, &calls, small,
+                                     sizeof(small));
+    CHECK(strlen(small) < sizeof(small));
+}
+
 void run_turns_tests(void);
 extern int turns_run;
 extern int turns_failed;
@@ -190,6 +298,10 @@ int main(void)
     RUN(test_blank);
     RUN(test_completion_json);
     RUN(test_completion_sse);
+    RUN(test_render_list_and_map);
+    RUN(test_render_other_kinds_as_a_note);
+    RUN(test_render_stays_in_the_buffer);
+    RUN(test_replace_widget_markers);
     run_turns_tests();
     s_run += turns_run;
     s_failed += turns_failed;

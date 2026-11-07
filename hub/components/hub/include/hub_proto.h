@@ -63,6 +63,31 @@ typedef enum {
  */
 hub_key_t hub_proto_page_key(const char *prompt);
 
+#define HUB_WIDGET_ID_MAX 128     /* bytes of a widget id, terminator included */
+
+/*
+ * A Muse widget (the "presentation" line's JSON) as plain text in out:
+ * - generic_list: data.title (else the first line of display_text), then "・title — subtitle (tertiary_title)"
+ *   per item; " — subtitle" and " (tertiary_title)" only when present, items without a title skipped;
+ * - local_map: the first line of display_text, then the same line per "marker" in data.typed_data.elements;
+ * - anything else (or a list with nothing to show): "(Muse アプリに表示: <display_text, else fallback_text,
+ *   else "画像の選択肢" for image_options, else "ウィジェット">)".
+ * Every text is shown without "**" and with each run of spaces and newlines as one space, trimmed.
+ */
+void hub_proto_render_presentation(const char *json, char *out, size_t cap);
+
+/* The widget JSON for id, or NULL if there is none. */
+typedef const char *(*hub_widget_lookup_t)(const char *id, void *ctx);
+
+/*
+ * text with each "[[hatch_widget:<id>]]" replaced by the widget rendered as above, or by HUB_UNKNOWN_WIDGET
+ * when lookup has none. A marker without its "]]", or with an empty or too long id, stays as it is.
+ */
+void hub_proto_replace_widget_markers(const char *text, hub_widget_lookup_t lookup, void *ctx, char *out,
+                                      size_t cap);
+
+extern const char HUB_UNKNOWN_WIDGET[];
+
 /* chat.completion JSON / SSE stream for text. cJSON_malloc'd; free with hub_proto_free(). NULL on no memory. */
 char *hub_proto_completion_json(const char *text, const char *model, long created, const char *id);
 char *hub_proto_completion_sse(const char *text, const char *model, long created, const char *id);

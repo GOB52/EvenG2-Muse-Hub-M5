@@ -18,6 +18,8 @@
 #define MSG_MIN_CAP 256            /* first allocation of a message's text; doubled as it grows */
 #define REPLY_BYTES (HUB_REPLY_MAX - 1)
 #define ERROR_MAX 160
+#define WIDGET_MAX 16              /* widgets kept per turn; later ones are dropped */
+#define WIDGET_JSON_MAX 16384      /* bytes of a widget's JSON; a longer one shows as a bare note */
 
 const char HUB_STILL_WORKING[] = "まだ考え中です。少ししてからもう一度話しかけてください。";
 const char HUB_CONTINUE_NOTE[] = "(まだ考え中です。「続き」と話しかけると続きを返します)";
@@ -35,6 +37,11 @@ typedef struct {
     bool used;
 } msg_t;
 
+typedef struct {
+    char id[HUB_WIDGET_ID_MAX];
+    char *json;                    /* hub_mem */
+} widget_t;
+
 static const hub_turns_ops_t *s_ops;
 static int s_wait_ms;
 static int64_t s_hold_ms;
@@ -47,6 +54,8 @@ static bool s_finished;
 static bool s_sent;                /* Muse accepted this turn's text (the hub's own "sent" line) */
 static bool s_detached;            /* the request stopped waiting: hold the result */
 static HUB_PSRAM_BSS msg_t s_msgs[MSG_MAX];
+static HUB_PSRAM_BSS widget_t s_widgets[WIDGET_MAX];   /* in arrival order */
+static int s_widget_count;
 static char s_error[ERROR_MAX];    /* non-empty: the turn failed */
 static HUB_PSRAM_BSS char s_held[HUB_REPLY_MAX];
 static bool s_has_held;
@@ -59,6 +68,11 @@ static void msgs_reset(void)
         hub_mem_free(s_msgs[i].text);
     }
     memset(s_msgs, 0, sizeof(s_msgs));
+    for (int i = 0; i < s_widget_count; i++) {
+        hub_mem_free(s_widgets[i].json);
+    }
+    memset(s_widgets, 0, sizeof(s_widgets));
+    s_widget_count = 0;
 }
 
 void hub_turns_init(const hub_turns_ops_t *ops, const int wait_ms, const int64_t hold_ms, const int64_t cap_ms,
@@ -143,22 +157,104 @@ static int msg_index(const char *fields)
     return i >= 0 && i < MSG_MAX ? i : -1;
 }
 
-/* The reply so far: the messages joined by blank lines. Call with the lock held. */
-static void build(char *out, const size_t cap)
+/* The id in a "presentation" line's fields ("\"id\":\"<id>\""); false if there is none. */
+static bool widget_id(const char *fields, char *id, const size_t cap)
 {
-    out[0] = '\0';
-    for (int i = 0; i < MSG_MAX; i++) {
-        if (!s_msgs[i].used || !s_msgs[i].len) {
-            continue;
+    const char *p = fields ? strstr(fields, "\"id\":\"") : NULL;
+    if (!p) {
+        return false;
+    }
+    p += 6;
+    const size_t n = strcspn(p, "\"");
+    if (n == 0 || n >= cap || p[n] != '"') {
+        return false;
+    }
+    memcpy(id, p, n);
+    id[n] = '\0';
+    return true;
+}
+
+static int widget_index(const char *id)
+{
+    for (int i = 0; i < s_widget_count; i++) {
+        if (strcmp(s_widgets[i].id, id) == 0) {
+            return i;
         }
-        if (out[0]) {
-            append(out, cap, "\n\n");
-        }
-        append(out, cap, s_msgs[i].text);
+    }
+    return -1;
+}
+
+/* Keeps a widget's JSON; one with an id seen before replaces it in place. Call with the lock held. */
+static void widget_store(const char *fields, const char *json)
+{
+    char id[HUB_WIDGET_ID_MAX];
+    if (!json || !widget_id(fields, id, sizeof(id))) {
+        return;
+    }
+    int i = widget_index(id);
+    if (i < 0 && s_widget_count == WIDGET_MAX) {
+        return;
+    }
+    const size_t len = strlen(json);
+    const size_t n = len < WIDGET_JSON_MAX ? len : 0;   /* too long: an empty JSON, shown as a bare note */
+    char *copy = hub_mem_alloc(n + 1);
+    if (!copy) {
+        return;
+    }
+    memcpy(copy, json, n);
+    copy[n] = '\0';
+    if (i < 0) {
+        i = s_widget_count++;
+        snprintf(s_widgets[i].id, sizeof(s_widgets[i].id), "%s", id);
+    }
+    hub_mem_free(s_widgets[i].json);
+    s_widgets[i].json = copy;
+}
+
+/* Marks the widgets a marker named, so they are not appended again. */
+static const char *lookup_widget(const char *id, void *ctx)
+{
+    const int i = widget_index(id);
+    if (i < 0) {
+        return NULL;
+    }
+    ((bool *)ctx)[i] = true;
+    return s_widgets[i].json;
+}
+
+static void begin_paragraph(char *out, const size_t cap)
+{
+    if (out[0]) {
+        append(out, cap, "\n\n");
     }
 }
 
-/* The finished turn's reply. A reply without text (Muse sent only a link or a card) gets a note. */
+/*
+ * The reply so far: the messages that are not blank, with their widget markers replaced, then the
+ * widgets no marker named, joined by blank lines. Call with the lock held.
+ */
+static void build(char *out, const size_t cap)
+{
+    bool named[WIDGET_MAX] = {false};
+    out[0] = '\0';
+    for (int i = 0; i < MSG_MAX; i++) {
+        if (!s_msgs[i].used || !s_msgs[i].len || hub_proto_is_blank(s_msgs[i].text)) {
+            continue;
+        }
+        begin_paragraph(out, cap);
+        const size_t used = strlen(out);
+        hub_proto_replace_widget_markers(s_msgs[i].text, lookup_widget, named, out + used, cap - used);
+    }
+    for (int i = 0; i < s_widget_count; i++) {
+        if (!named[i]) {
+            begin_paragraph(out, cap);
+            const size_t used = strlen(out);
+            hub_proto_render_presentation(s_widgets[i].json, out + used, cap - used);
+        }
+    }
+}
+
+/* The finished turn's reply. A reply without text or widgets (Muse sent only a link, say) gets a note. */
 static void result(char *out, const size_t cap)
 {
     if (s_error[0]) {
@@ -218,6 +314,8 @@ void hub_turns_on_event(const char *type, const char *fields, const char *text)
             s_msgs[i].used = true;
             msg_append(&s_msgs[i], text);
         }
+    } else if (strcmp(type, "presentation") == 0) {
+        widget_store(fields, text);
     } else if (strcmp(type, "done") == 0 || strcmp(type, "error") == 0) {
         if (type[0] == 'e') {
             set_error(text);

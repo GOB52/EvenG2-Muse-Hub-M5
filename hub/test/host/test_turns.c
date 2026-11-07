@@ -33,6 +33,14 @@ static const char *s_script;   /* what start_turn emits: fast multi busy slow lo
 static const char *s_reply;    /* the "reply" script's one message; NULL sends no text */
 static char s_last_prompt[256];
 
+typedef struct {
+    const char *type;
+    const char *fields;
+    const char *text;
+} event_t;
+
+static const event_t *s_events;   /* the "events" script's lines, up to one with a NULL type */
+
 static int64_t now_ms(void) { return s_now; }
 static void lock(void) { pthread_mutex_lock(&s_mu); }
 static void unlock(void) { pthread_mutex_unlock(&s_mu); }
@@ -123,6 +131,10 @@ static bool start_turn(const char *prompt)
             hub_turns_on_event("text", "\"msg\":0", s_reply);
         }
         hub_turns_on_event("done", "\"messages\":1,\"complete\":true", NULL);
+    } else if (strcmp(s_script, "events") == 0) {
+        for (const event_t *e = s_events; e->type; e++) {
+            hub_turns_on_event(e->type, e->fields, e->text);
+        }
     } else if (strcmp(s_script, "longfast") == 0) {
         hub_turns_on_event("sent", "\"bytes\":3", NULL);
         repeat(piece, sizeof(piece), "あ", 500);
@@ -699,6 +711,130 @@ static void test_new_question_drops_the_held_pages(void)
     }
 }
 
+#define DICE "{\"id\":\"widget-A\",\"kind\":\"html\",\"fallback_text\":\"サイコロ\",\"data\":{}}"
+#define DICE_TEXT "(Muse アプリに表示: サイコロ)"
+#define LIST "{\"id\":\"widget-B\",\"kind\":\"generic_list\",\"data\":{\"title\":\"一覧\",\"items\":[{\"title\":\"a\"}]}}"
+#define LIST_TEXT "一覧\n・a"
+
+static void ask_events(const event_t *events, char *out, const size_t out_len)
+{
+    setup("events");
+    s_events = events;
+    hub_turns_ask("q", out, out_len);
+}
+
+static void test_widget_marker_is_replaced(void)
+{
+    static const event_t events[] = {
+        {"sent", "\"bytes\":1", NULL},
+        {"presentation", "\"id\":\"widget-A\"", DICE},
+        {"text", "\"msg\":0", "見本です。\n\n[[hatch_widget:widget-A]]"},
+        {"text", "\"msg\":1", "[[hatch_widget:widget-X]]"},
+        {"done", "\"messages\":2,\"complete\":true", NULL},
+        {NULL, NULL, NULL},
+    };
+    char out[HUB_REPLY_MAX];
+    ask_events(events, out, sizeof(out));
+    CHECK(strcmp(out, "見本です。\n\n" DICE_TEXT "\n\n(Muse アプリに表示: 選択肢など)") == 0);
+}
+
+static void test_widgets_without_markers_replace_blank_messages(void)
+{
+    static const event_t events[] = {
+        {"sent", "\"bytes\":1", NULL},
+        {"presentation", "\"id\":\"widget-B\"", LIST},
+        {"text", "\"msg\":0", ""},
+        {"presentation", "\"id\":\"widget-A\"", DICE},
+        {"text", "\"msg\":1", "\n　"},
+        {"done", "\"messages\":2,\"complete\":true", NULL},
+        {NULL, NULL, NULL},
+    };
+    char out[HUB_REPLY_MAX];
+    ask_events(events, out, sizeof(out));
+    CHECK(strcmp(out, LIST_TEXT "\n\n" DICE_TEXT) == 0);
+}
+
+static void test_widgets_follow_the_text_and_a_repeat_replaces(void)
+{
+    static const event_t events[] = {
+        {"sent", "\"bytes\":1", NULL},
+        {"presentation", "\"id\":\"widget-A\"", "{\"kind\":\"html\"}"},
+        {"text", "\"msg\":0", "本文"},
+        {"presentation", "\"id\":\"widget-B\"", LIST},
+        {"presentation", "\"id\":\"widget-A\"", DICE},
+        {"done", "\"messages\":1,\"complete\":true", NULL},
+        {NULL, NULL, NULL},
+    };
+    char out[HUB_REPLY_MAX];
+    ask_events(events, out, sizeof(out));
+    CHECK(strcmp(out, "本文\n\n" DICE_TEXT "\n\n" LIST_TEXT) == 0);
+}
+
+static void test_widgets_before_sent_are_ignored(void)
+{
+    static const event_t events[] = {
+        {"presentation", "\"id\":\"widget-A\"", DICE},
+        {"sent", "\"bytes\":1", NULL},
+        {"text", "\"msg\":0", "返事"},
+        {"done", "\"messages\":1,\"complete\":true", NULL},
+        {NULL, NULL, NULL},
+    };
+    static const event_t only_before[] = {
+        {"presentation", "\"id\":\"widget-A\"", DICE},
+        {"sent", "\"bytes\":1", NULL},
+        {"done", "\"messages\":1,\"complete\":true", NULL},
+        {NULL, NULL, NULL},
+    };
+    char out[HUB_REPLY_MAX];
+    ask_events(events, out, sizeof(out));
+    CHECK(strcmp(out, "返事") == 0);
+    ask_events(only_before, out, sizeof(out));
+    CHECK(strcmp(out, HUB_EMPTY_NOTE) == 0);
+}
+
+static void test_widgets_are_dropped_with_the_turn(void)
+{
+    static const event_t first[] = {
+        {"sent", "\"bytes\":1", NULL},
+        {"presentation", "\"id\":\"widget-A\"", DICE},
+        {"done", "\"messages\":1,\"complete\":true", NULL},
+        {NULL, NULL, NULL},
+    };
+    static const event_t second[] = {
+        {"sent", "\"bytes\":1", NULL},
+        {"text", "\"msg\":0", "[[hatch_widget:widget-A]]"},
+        {"done", "\"messages\":1,\"complete\":true", NULL},
+        {NULL, NULL, NULL},
+    };
+    char out[HUB_REPLY_MAX];
+    ask_events(first, out, sizeof(out));
+    CHECK(strcmp(out, DICE_TEXT) == 0);
+    s_events = second;
+    hub_turns_ask("q", out, sizeof(out));
+    CHECK(strcmp(out, "(Muse アプリに表示: 選択肢など)") == 0);
+}
+
+static void test_widget_count_is_capped(void)
+{
+    static char ids[20][32];
+    static event_t events[24];
+    int n = 0;
+    events[n++] = (event_t){"sent", "\"bytes\":1", NULL};
+    for (int i = 0; i < 20; i++) {
+        snprintf(ids[i], sizeof(ids[i]), "\"id\":\"widget-%d\"", i);
+        events[n++] = (event_t){"presentation", ids[i], "{\"kind\":\"html\",\"fallback_text\":\"w\"}"};
+    }
+    events[n++] = (event_t){"done", "\"messages\":0,\"complete\":true", NULL};
+    events[n] = (event_t){NULL, NULL, NULL};
+    char out[HUB_REPLY_MAX];
+    ask_events(events, out, sizeof(out));
+    int shown = 0;
+    for (const char *p = strstr(out, "(Muse"); p; p = strstr(p + 1, "(Muse")) {
+        shown++;
+    }
+    CHECK(shown == 16);
+}
+
 void run_turns_tests(void)
 {
     test_fast_reply_is_returned_whole();
@@ -731,4 +867,10 @@ void run_turns_tests(void)
     test_busy_before_sent_is_still_mapped();
     test_cant_reach_before_sent_ends_the_turn();
     test_stuck_turn_is_dropped_after_the_cap();
+    test_widget_marker_is_replaced();
+    test_widgets_without_markers_replace_blank_messages();
+    test_widgets_follow_the_text_and_a_repeat_replaces();
+    test_widgets_before_sent_are_ignored();
+    test_widgets_are_dropped_with_the_turn();
+    test_widget_count_is_capped();
 }
