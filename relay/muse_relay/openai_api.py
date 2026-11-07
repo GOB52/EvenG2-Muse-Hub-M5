@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 MAX_CHARS = 2000       # a page of a reply; the G2 scrolls
+ALL_MAX_CHARS = 5000   # characters returned at once for 「終わりまで」/「全部」; the G2 scrolls
 
 
 class BadRequest(Exception):
@@ -263,7 +264,7 @@ def make_handler(turns, token: str, capture_dir: Optional[Path] = None):
             except (ValueError, BadRequest) as e:
                 self._send_json(400, {"error": {"message": str(e)}})
                 return
-            reply = clip(turns.ask(prompt))
+            reply = clip(turns.ask(prompt), ALL_MAX_CHARS)     # a safety clip: turns pages the reply
             model = body.get("model") or MODEL_ID
             created = int(time.time())
             cid = "chatcmpl-" + uuid.uuid4().hex

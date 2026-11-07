@@ -4,7 +4,7 @@ import pytest
 
 from muse_relay.openai_api import MAX_CHARS, split_page
 from muse_relay.turns import (CONTINUE_NOTE, EMPTY_NOTE, MSG_INTERNAL, PAGE_NOTE, STILL_WORKING, LinkError,
-                              TurnManager)
+                              TurnManager, page_key)
 
 PAGE_CHARS = 300
 PAGE_ROOM = PAGE_CHARS - len(PAGE_NOTE) - 1
@@ -115,9 +115,9 @@ def test_held_reply_is_returned_once():
     turns.ask("q1")
     link.release()
     _wait_idle(turns)
-    assert turns.ask("q2") == "保持"
+    assert turns.ask("続き") == "保持"
     link.reply, link.auto = "次", True
-    assert turns.ask("q3") == "次"
+    assert turns.ask("続き") == "次"
 
 
 class BrokenLink:
@@ -186,8 +186,8 @@ def test_timeout_held_long_reply_is_paged():
     assert turns.ask("q1") == CONTINUE_NOTE
     link.release()
     _wait_idle(turns)
-    assert turns.ask("q2") == "あ" * PAGE_ROOM + "\n" + PAGE_NOTE
-    assert turns.ask("q3") == "あ" * (500 - PAGE_ROOM)
+    assert turns.ask("続き") == "あ" * PAGE_ROOM + "\n" + PAGE_NOTE
+    assert turns.ask("続き") == "あ" * (500 - PAGE_ROOM)
     assert link.prompts == ["q1"]
 
 
@@ -202,7 +202,61 @@ def test_empty_held_reply_gives_the_note():
     turns.ask("q1")
     link.release()
     _wait_idle(turns)
-    assert turns.ask("q2") == EMPTY_NOTE
+    assert turns.ask("続き") == EMPTY_NOTE
+
+
+KEY_ALL_MAX = 2000
+
+
+def _first_page(all_max_chars=KEY_ALL_MAX):
+    link = FakeLink(reply="あ" * 1500)
+    turns = TurnManager(link, wait_s=2, max_chars=PAGE_CHARS, all_max_chars=all_max_chars)
+    assert turns.ask("q").endswith("\n" + PAGE_NOTE)
+    return link, turns
+
+
+@pytest.mark.parametrize("prompt", ["続き", "続きを見せて。", " つ づ き ！", "「次」", "もっと…"])
+def test_continue_words_give_the_next_page(prompt):
+    link, turns = _first_page()
+    assert turns.ask(prompt) == "あ" * PAGE_ROOM + "\n" + PAGE_NOTE
+    assert link.prompts == ["q"]
+
+
+@pytest.mark.parametrize("prompt", ["終わりまで", "最後まで。", "「全部」！", "全文", "続きを全部"])
+def test_all_words_give_the_whole_rest(prompt):
+    link, turns = _first_page()
+    assert turns.ask(prompt) == "あ" * (1500 - PAGE_ROOM)
+    link.reply = "次の返事"
+    assert turns.ask("続き") == "次の返事"       # nothing is held any more
+    assert link.prompts == ["q", "続き"]
+
+
+def test_all_pages_a_rest_longer_than_all_max():
+    link, turns = _first_page(all_max_chars=500)
+    assert turns.ask("全部") == "あ" * (500 - len(PAGE_NOTE) - 1) + "\n" + PAGE_NOTE
+    out = turns.ask("続き")
+    assert out.endswith("\n" + PAGE_NOTE) and len(out) <= PAGE_CHARS
+    assert link.prompts == ["q"]
+
+
+@pytest.mark.parametrize("prompt", ["明日の天気は", "次の東京の天気と明日の大阪の天気を教えてください"])
+def test_new_question_drops_the_held_pages(prompt):
+    link, turns = _first_page()
+    link.reply = "新しい返事"
+    assert turns.ask(prompt) == "新しい返事"
+    assert link.prompts == ["q", prompt]
+    assert turns.ask("続き") == "新しい返事"     # the old pages are gone
+    assert link.prompts == ["q", prompt, "続き"]
+
+
+@pytest.mark.parametrize("prompt, key", [
+    ("続き", "continue"), ("続きを見せて。", "continue"), ("\u3000つづき、！", "continue"), ("もっと", "continue"),
+    ("「終わり、まで」…", "all"), ("続きを全部", "all"), ("さいごまで", "all"),
+    ("次の東京の天気と明日の大阪の天気を教えてください", None), ("天気は", None), ("", None),
+    ("続きの話はまた今度にしましょうね", None),
+])
+def test_page_key(prompt, key):
+    assert page_key(prompt) == key
 
 
 def _wait_idle(turns):

@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from muse_relay.openai_api import (MAX_CHARS, BadRequest, check_auth, clip, completion_json,
+from muse_relay.openai_api import (ALL_MAX_CHARS, MAX_CHARS, BadRequest, check_auth, clip, completion_json,
                                    completion_sse, extract_prompt, redact_headers)
 
 
@@ -185,9 +185,16 @@ def test_models_lists_one_model(server):
 
 def test_reply_is_clipped(server):
     url, turns, _ = server
-    turns.reply = "あ" * (MAX_CHARS + 1000)
+    turns.reply = "あ" * (ALL_MAX_CHARS + 1000)
     d = json.loads(_post(url, USER)[2])
-    assert len(d["choices"][0]["message"]["content"]) == MAX_CHARS
+    assert len(d["choices"][0]["message"]["content"]) == ALL_MAX_CHARS
+
+
+def test_reply_of_the_whole_rest_is_not_clipped_at_a_page(server):
+    url, turns, _ = server
+    turns.reply = "あ" * (MAX_CHARS + 1000)          # 「終わりまで」 returns up to ALL_MAX_CHARS
+    d = json.loads(_post(url, USER)[2])
+    assert d["choices"][0]["message"]["content"] == turns.reply
 
 
 def test_capture_saves_request_without_token(server):
