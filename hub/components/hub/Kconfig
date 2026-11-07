@@ -20,7 +20,8 @@ menu "Muse hub (Even AI endpoint)"
         default 25
         help
             Even AI gives up after about 30 s. A reply that takes longer is
-            held and returned to the next request.
+            held; saying 「続き」 (or 「終わりまで」) returns it, any other
+            prompt drops it and asks Muse anew.
 
     config HUB_MAX_CHARS
         int "Characters per page of a reply"

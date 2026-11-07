@@ -15,7 +15,7 @@ from .openai_api import ALL_MAX_CHARS, MAX_CHARS, clip, split_page
 WAIT_S = 25.0
 HOLD_S = 10 * 60.0
 STILL_WORKING = "まだ考え中です。少ししてからもう一度話しかけてください。"
-CONTINUE_NOTE = "(まだ考え中です。もう一度話しかけると続きを返します)"
+CONTINUE_NOTE = "(まだ考え中です。「続き」と話しかけると続きを返します)"
 PAGE_NOTE = "(続きは「続き」、残り全部は「終わりまで」と話しかけてください)"
 EMPTY_NOTE = "(Muse の返事にテキストがありませんでした。リンクや画像はガジェットに届きません)"
 MSG_INTERNAL = "Muse に届きませんでした (内部エラー)。"

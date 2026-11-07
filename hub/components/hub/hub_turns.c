@@ -20,7 +20,7 @@
 #define ERROR_MAX 160
 
 const char HUB_STILL_WORKING[] = "まだ考え中です。少ししてからもう一度話しかけてください。";
-const char HUB_CONTINUE_NOTE[] = "(まだ考え中です。もう一度話しかけると続きを返します)";
+const char HUB_CONTINUE_NOTE[] = "(まだ考え中です。「続き」と話しかけると続きを返します)";
 const char HUB_PAGE_NOTE[] = "(続きは「続き」、残り全部は「終わりまで」と話しかけてください)";
 const char HUB_EMPTY_NOTE[] = "(Muse の返事にテキストがありませんでした。リンクや画像はガジェットに届きません)";
 const char HUB_MSG_BUSY[] = "StickS3 で音声の会話中です。終わってからもう一度どうぞ。";
