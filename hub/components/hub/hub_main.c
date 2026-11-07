@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_timer.h"
@@ -21,6 +22,9 @@
 #define NET_TASK_PRIO 4
 #define HOLD_MS (10 * 60 * 1000LL)
 #define TURN_CAP_MS (16 * 60 * 1000LL)
+
+/* The SDK's control link to Muse is up: the gadget is paired and online (main/noise_control.h). */
+extern bool noise_ctrl_is_connected(void);
 
 static const char *TAG = "hub";
 static SemaphoreHandle_t s_mutex;
@@ -70,26 +74,41 @@ static void announce(const esp_ip4_addr_t *ip, const uint16_t port)
     muse_state_set_hint(hint);
 }
 
+static uint32_t sta_ip(esp_netif_ip_info_t *info)
+{
+    esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (!sta || esp_netif_get_ip_info(sta, info) != ESP_OK) {
+        return 0;
+    }
+    return info->ip.addr;
+}
+
+/*
+ * Starts the endpoint once the gadget is paired and online: during setup the
+ * SDK needs the internal RAM (its Wi-Fi scan task) that the server would hold.
+ */
 static void net_task(void *arg)
 {
     const uint16_t port = CONFIG_HUB_HTTP_PORT;
     uint32_t last = 0;
     bool started = false;
     for (;;) {
-        esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
         esp_netif_ip_info_t info;
-        if (sta && esp_netif_get_ip_info(sta, &info) == ESP_OK && info.ip.addr && info.ip.addr != last) {
-            last = info.ip.addr;
-            if (!started) {
-                const esp_err_t err = hub_http_start(port, CONFIG_HUB_RELAY_TOKEN);
-                if (err != ESP_OK) {
-                    ESP_LOGE(TAG, "HTTP server not started (%s): set CONFIG_HUB_RELAY_TOKEN (32+ chars)",
-                             esp_err_to_name(err));
-                    vTaskDelete(NULL);
+        const uint32_t addr = sta_ip(&info);
+        if (!started && addr && noise_ctrl_is_connected()) {
+            const esp_err_t err = hub_http_start(port, CONFIG_HUB_RELAY_TOKEN);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "HTTP server not started (%s): set CONFIG_HUB_RELAY_TOKEN (32+ chars)",
+                         esp_err_to_name(err));
+                for (;;) {
+                    vTaskDelay(portMAX_DELAY);   /* a task with a PSRAM stack can't delete itself */
                 }
-                start_mdns(port);
-                started = true;
             }
+            start_mdns(port);
+            started = true;
+        }
+        if (started && addr && addr != last) {
+            last = addr;
             announce(&info.ip, port);
         }
         vTaskDelay(pdMS_TO_TICKS(NET_POLL_MS));
@@ -106,5 +125,9 @@ void hub_app_start(void)
     }
     hub_turns_init(&OPS, CONFIG_HUB_WAIT_S * 1000, HOLD_MS, TURN_CAP_MS);
     muse_hatch_set_listener(hub_turns_on_event);
-    xTaskCreate(net_task, "hub_net", NET_TASK_STACK, NULL, NET_TASK_PRIO, NULL);
+    /* Stacks in PSRAM: the SDK's own tasks need the internal RAM. */
+    if (xTaskCreateWithCaps(net_task, "hub_net", NET_TASK_STACK, NULL, NET_TASK_PRIO, NULL,
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+        ESP_LOGE(TAG, "no memory for the hub task");
+    }
 }

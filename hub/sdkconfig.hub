@@ -11,3 +11,6 @@ CONFIG_SECURE_BOOT_SIGNING_KEY="third_party/muse-gadget-sdk/esp32/dev_signing_ke
 # table's 0x3E0000 app slots have room.
 CONFIG_MUSE_CJK_FONT=y
 CONFIG_MUSE_CJK_FONT_NOTO=n
+
+# The hub's mDNS task stack in PSRAM: the SDK's own tasks need the internal RAM.
+CONFIG_MDNS_TASK_CREATE_FROM_SPIRAM=y

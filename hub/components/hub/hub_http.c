@@ -6,6 +6,7 @@
 #include <time.h>
 
 #include "esp_check.h"
+#include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_random.h"
@@ -143,6 +144,7 @@ esp_err_t hub_http_start(const uint16_t port, const char *token)
     config.stack_size = SERVER_STACK;
     config.lru_purge_enable = true;
     config.max_open_sockets = 4;
+    config.task_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;   /* the SDK needs the internal RAM */
     ESP_RETURN_ON_ERROR(httpd_start(&s_server, &config), TAG, "httpd_start");
     for (size_t i = 0; i < sizeof(PATHS) / sizeof(PATHS[0]); i++) {
         const httpd_uri_t get = { .uri = PATHS[i], .method = HTTP_GET, .handler = probe_handler };
