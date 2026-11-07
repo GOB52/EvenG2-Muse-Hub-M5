@@ -1,10 +1,12 @@
 # M5StackMuseEvenG2
 
-Even G2 のマイク音声を、Muse Gadget にした M5Stack に中継して Muse と会話するための実験プロジェクト。
+Even G2 から、Muse Gadget にした M5Stack を経由して Muse 本人と会話するための実験プロジェクト。
+G2 の Even AI (カスタムエージェント) の質問を、StickS3 のテキストターンで Muse に渡し、返事を G2 の HUD に返す。
 
 | dir | 中身 |
 |---|---|
 | `hub/` | M5Stack StickS3 用 Muse Gadget ファーム (ESP-IDF) |
+| `relay/` | Even AI カスタムエージェント → StickS3 (USB) → Muse のテキスト relay (Python) |
 
 ## hub のビルド
 
@@ -41,6 +43,38 @@ hub/tools/build.sh flash-monitor /dev/cu.usbmodemXXXX
   python hub/third_party/muse-gadget-sdk/esp32/tools/muse/chat.py --port /dev/cu.usbmodemXXXX "質問"
   python hub/third_party/muse-gadget-sdk/esp32/tools/muse/chat.py --port /dev/cu.usbmodemXXXX --status
   ```
+
+## relay (Even AI → Muse)
+
+```
+G2「Hey Even …」→ Even アプリ (STT はクラウド) ─POST /v1/chat/completions─▶ relay (Mac) ─USB─▶ StickS3 ─▶ Muse
+```
+
+Even AI のカスタムエージェントの POST は、Even のクラウドではなく**スマホの Even アプリ** (`User-Agent: EvenCore/1.0`)
+から届く。本文は OpenAI chat completions 形式で、`stream` なし、`messages` は最新の発話 1 つだけ。
+
+```sh
+cd relay
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+# relay/.env に RELAY_TOKEN=<32 文字以上の乱数> を書く (git-ignored)
+.venv/bin/python -m muse_relay --port /dev/cu.usbmodemXXXX     # 127.0.0.1:8787
+tailscale funnel --bg 8787                                       # https://<mac>.<tailnet>.ts.net
+```
+
+Even 側の登録:
+
+1. [Even Hub](https://hub.evenrealities.com/login) に Even アプリと同じアカウントでサインインし、アプリを完全に終了して
+   開き直す (これで開発者向けの設定が出る)。
+2. Even アプリの 設定 → Even AI → エージェント設定 (Agent Configuration) で、Endpoint に
+   `https://<mac>.<tailnet>.ts.net/v1/chat/completions`、API Key に `RELAY_TOKEN` の値を入れて Save & Activate。
+
+- relay を起動するとシリアルポートを開くので、StickS3 は 1 回リセットされる。
+- Even AI は約 30 秒で諦めるので、25 秒で返事が揃わなければ届いた分と「まだ考え中」を返す。返事は保持され、
+  次に話しかけたとき (内容は問わない) に返る (10 分で破棄)。返事は 400 文字で切る。
+- StickS3 で音声の会話中はテキストのターンを受け付けない。
+- Funnel は公開 URL なので、ボットのアクセスが来る。認証の無いリクエストは本文を読まずに 401 / 404 で返す。
+- `--capture` で届いたリクエストを `relay/captures/` に保存する (認証系のヘッダは伏せる)。
+- テスト: `cd relay && .venv/bin/python -m pytest -q`
 
 ## SDK
 
