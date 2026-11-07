@@ -67,6 +67,16 @@ def test_redact_headers_hides_authorization_value():
     assert out["Content-Type"] == "application/json"
 
 
+def test_redact_headers_hides_every_credential_shaped_header():
+    out = redact_headers({"Authorization": "bare-secret", "x-api-key": "k-secret", "api-key": "k2-secret",
+                          "Cookie": "sid=c-secret", "Authorization-Extra": "Basic b-secret"})
+    dumped = json.dumps(out)
+    for secret in ("bare-secret", "k-secret", "k2-secret", "c-secret", "b-secret"):
+        assert secret not in dumped
+    assert out["Authorization"] == "<redacted len=11>"
+    assert out["Authorization-Extra"] == "Basic <redacted len=8>"
+
+
 import threading
 import urllib.error
 import urllib.request

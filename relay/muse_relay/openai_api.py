@@ -69,14 +69,22 @@ def completion_sse(text: str, model: str, created: int, cid: str) -> bytes:
     return out.encode("utf-8")
 
 
+SECRET_NAME_PARTS = ("auth", "key", "token", "cookie")
+KNOWN_SCHEMES = ("Bearer ", "Basic ")
+
+
+def _redact_value(value: str) -> str:
+    for scheme in KNOWN_SCHEMES:
+        if value.startswith(scheme):
+            return f"{scheme}<redacted len={len(value) - len(scheme)}>"
+    return f"<redacted len={len(value)}>"
+
+
 def redact_headers(headers) -> dict:
     out = {}
     for k, v in headers.items():
-        if k.lower() == "authorization":
-            scheme, _, cred = v.partition(" ")
-            out[k] = f"{scheme} <redacted len={len(cred)}>"
-        else:
-            out[k] = v
+        secret = any(part in k.lower() for part in SECRET_NAME_PARTS)
+        out[k] = _redact_value(v) if secret else v
     return out
 
 
