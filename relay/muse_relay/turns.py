@@ -4,13 +4,14 @@ Even AI gives up after about 30 s, so a request waits at most WAIT_S. A turn
 that takes longer keeps running; its reply is held and returned to the next
 request that asks for it ("続き"), which is not sent to Muse. A reply longer
 than a page is split and the rest held the same way: "続き" returns the next
-page, "終わりまで" the rest at once, and any other prompt drops it and asks Muse.
+page, "終わりまで" the rest at once, and any other prompt drops it and asks Muse. After the hold
+expires, a paging word gets EXPIRED_NOTE instead of going to Muse, until the next new question.
 """
 import threading
 import time
 from typing import Callable, Optional
 
-from .openai_api import ALL_MAX_CHARS, MAX_CHARS, clip, split_page
+from .openai_api import ALL_MAX_CHARS, BLANK_CHARS, MAX_CHARS, clip, split_page
 
 WAIT_S = 25.0
 HOLD_S = 10 * 60.0
@@ -19,25 +20,44 @@ CONTINUE_NOTE = "(まだ考え中です。「続き」と話しかけると続�
 PAGE_NOTE = "(続きは「続き」、残り全部は「終わりまで」と話しかけてください)"
 EMPTY_NOTE = "(Muse の返事にテキストがありませんでした。リンクや画像はガジェットに届きません)"
 MSG_INTERNAL = "Muse に届きませんでした (内部エラー)。"
+EXPIRED_NOTE = "(続きの保持は期限切れです。もう一度質問してください)"
 
-# Words that ask for held pages; edit here.
-PAGE_ALL_WORDS = ("終わりまで", "おわりまで", "最後まで", "さいごまで", "全部", "ぜんぶ", "全文")
+# Words that ask for held pages, and what may follow them; edit here.
+PAGE_ALL_WORDS = ("終わりまで", "おわりまで", "最後まで", "さいごまで", "全部", "ぜんぶ", "全文",
+                  "続きを全部", "続き全部", "残り全部", "残り")
 PAGE_CONTINUE_WORDS = ("続き", "つづき", "続けて", "つづけて", "次", "つぎ", "もっと")
-PAGE_KEY_IGNORED = frozenset("。、．，！？!?.,「」『』…ー〜~")    # and whitespace
-PAGE_KEY_MAX_CHARS = 12
+PAGE_KEY_SUFFIXES = ("", "を", "を見せて", "をみせて", "を教えて", "をおしえて", "をお願い", "をおねがい", "をください",
+                     "お願い", "おねがい", "見せて", "みせて", "して", "のページ", "ページ", "読んで", "よんで",
+                     "を読んで", "をよんで")
+PAGE_KEY_IGNORED = frozenset(BLANK_CHARS + "。、．，！？!?.,「」『』…ー〜~")
+
+
+def _key_text(text: str) -> str:
+    return "".join(c for c in text if c not in PAGE_KEY_IGNORED)
+
+
+# The suffixes without the ignored characters too ("ページ" has a "ー").
+_SUFFIX_KEYS = frozenset(_key_text(s) for s in PAGE_KEY_SUFFIXES)
+
+
+def _is_word_with_suffix(key: str, words: tuple[str, ...]) -> bool:
+    return any(key.startswith(w) and key[len(w):] in _SUFFIX_KEYS for w in words)
 
 
 def page_key(prompt: str) -> Optional[str]:
-    """"all", "continue" or None (a new question). Spaces and punctuation are ignored; a prompt
-    left with more than PAGE_KEY_MAX_CHARS characters is a new question."""
-    key = "".join(c for c in prompt if not c.isspace() and c not in PAGE_KEY_IGNORED)
-    if len(key) > PAGE_KEY_MAX_CHARS:
-        return None
-    if any(w in key for w in PAGE_ALL_WORDS):
+    """"all", "continue" or None (a new question). Spaces and punctuation are ignored; what is left
+    must be one of the words followed by one of PAGE_KEY_SUFFIXES. ALL words are tried first."""
+    key = _key_text(prompt)
+    if _is_word_with_suffix(key, PAGE_ALL_WORDS):
         return "all"
-    if any(w in key for w in PAGE_CONTINUE_WORDS):
+    if _is_word_with_suffix(key, PAGE_CONTINUE_WORDS):
         return "continue"
     return None
+
+
+def _room(limit: int, note: str) -> int:
+    """Characters left for the text when "\n" + note must also fit in limit; at least 1."""
+    return max(limit - len(note) - 1, 1)
 
 
 class LinkError(Exception):
@@ -57,7 +77,7 @@ class _Turn:
         """A reply without text (Muse sent only a link or a card) gets a note."""
         if self.error is not None:
             return self.error
-        return self.reply if self.reply.strip() else EMPTY_NOTE
+        return self.reply if self.reply.strip(BLANK_CHARS) else EMPTY_NOTE
 
     def partial(self) -> str:
         return self.partial_text
@@ -76,6 +96,7 @@ class TurnManager:
         self._lock = threading.Lock()
         self._running: Optional[_Turn] = None
         self._held: Optional[tuple[str, float]] = None
+        self._expired = False      # the held reply expired; cleared by the next new turn
 
     def busy(self) -> bool:
         with self._lock:
@@ -90,6 +111,7 @@ class TurnManager:
                 return STILL_WORKING
             turn = _Turn()
             self._running = turn
+            self._expired = False
         threading.Thread(target=self._run, args=(turn, text), daemon=True).start()
         turn.done.wait(self._wait_s)
         with self._lock:
@@ -99,7 +121,7 @@ class TurnManager:
             partial = turn.partial()
         if not partial:
             return CONTINUE_NOTE
-        return f"{clip(partial, self._max_chars - len(CONTINUE_NOTE) - 1)}\n{CONTINUE_NOTE}"
+        return f"{clip(partial, _room(self._max_chars, CONTINUE_NOTE))}\n{CONTINUE_NOTE}"
 
     def _run(self, turn: _Turn, text: str) -> None:
         try:
@@ -122,20 +144,27 @@ class TurnManager:
         limit = self._max_chars if limit is None else limit
         if len(text) <= limit:
             return text
-        page, rest = split_page(text, limit - len(PAGE_NOTE) - 1)
+        page, rest = split_page(text, _room(limit, PAGE_NOTE))
         if not rest:
             return page
         self._held = (rest, self._clock())
         return f"{page}\n{PAGE_NOTE}"
 
+    def _expire_held(self) -> None:
+        if self._held is not None and self._clock() - self._held[1] > self._hold_s:
+            self._held = None
+            self._expired = True
+
     def _take_held(self, prompt: str) -> Optional[str]:
-        """The held reply's next page if prompt asks for one; any other prompt drops it.
-        Call with the lock held."""
-        if self._held is None:
-            return None
-        text, at = self._held
-        self._held = None
+        """The held reply's next page if prompt asks for one, or EXPIRED_NOTE if it expired; any
+        other prompt drops it. Call with the lock held."""
+        self._expire_held()
         key = page_key(prompt)
-        if key is None or self._clock() - at > self._hold_s:
+        held, self._held = self._held, None
+        if key is None:
             return None
-        return self._page(text, self._all_max_chars if key == "all" else self._max_chars)
+        if self._expired:
+            return EXPIRED_NOTE
+        if held is None:
+            return None
+        return self._page(held[0], self._all_max_chars if key == "all" else self._max_chars)

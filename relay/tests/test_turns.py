@@ -3,8 +3,8 @@ import threading
 import pytest
 
 from muse_relay.openai_api import MAX_CHARS, split_page
-from muse_relay.turns import (CONTINUE_NOTE, EMPTY_NOTE, MSG_INTERNAL, PAGE_NOTE, STILL_WORKING, LinkError,
-                              TurnManager, page_key)
+from muse_relay.turns import (CONTINUE_NOTE, EMPTY_NOTE, EXPIRED_NOTE, MSG_INTERNAL, PAGE_NOTE, STILL_WORKING,
+                              LinkError, TurnManager, page_key)
 
 PAGE_CHARS = 300
 PAGE_ROOM = PAGE_CHARS - len(PAGE_NOTE) - 1
@@ -96,6 +96,17 @@ def test_request_while_running_says_still_working():
     link.release()
 
 
+def _check_expired_then_new_turn(link, turns):
+    """After an expired hold, a paging word gets the note (nothing is sent); a new question clears it."""
+    link.reply, link.auto = "新しい返事", True
+    assert turns.ask("続き") == EXPIRED_NOTE
+    assert turns.ask("終わりまで") == EXPIRED_NOTE
+    assert link.prompts == ["q1"]
+    assert turns.ask("q2") == "新しい返事"
+    assert turns.ask("続き") == "新しい返事"    # nothing is held: a question for Muse
+    assert link.prompts == ["q1", "q2", "続き"]
+
+
 def test_held_reply_expires():
     clock = Clock()
     link = FakeLink(reply="古い返事", auto=False)
@@ -104,9 +115,27 @@ def test_held_reply_expires():
     link.release()
     _wait_idle(turns)
     clock.now += 601
-    link.reply, link.auto = "新しい返事", True
-    assert turns.ask("q2") == "新しい返事"
-    assert link.prompts == ["q1", "q2"]
+    _check_expired_then_new_turn(link, turns)
+
+
+def test_continue_without_a_held_reply_goes_to_muse():
+    link = FakeLink(reply="はい")
+    turns = TurnManager(link, wait_s=2)
+    assert turns.ask("続き") == "はい"
+    assert link.prompts == ["続き"]
+
+
+def test_tiny_max_chars_does_not_underflow():
+    link = FakeLink(pieces=("途中まで。",), auto=False)
+    turns = TurnManager(link, wait_s=0.2, max_chars=10)
+    assert turns.ask("q") == "…\n" + CONTINUE_NOTE
+    link.release()
+    _wait_idle(turns)
+    link = FakeLink(reply="あ" * 50)
+    turns = TurnManager(link, wait_s=2, max_chars=10)
+    assert turns.ask("q") == "あ\n" + PAGE_NOTE
+    assert turns.ask("続き") == "あ\n" + PAGE_NOTE
+    assert link.prompts == ["q"]
 
 
 def test_held_reply_is_returned_once():
@@ -174,10 +203,26 @@ def test_held_page_expires():
     link = FakeLink(reply="あ" * 700)
     turns = TurnManager(link, wait_s=2, hold_s=600, clock=clock, max_chars=PAGE_CHARS)
     assert turns.ask("q1").endswith(PAGE_NOTE)
+    clock.now += 600                      # still held at exactly the hold
+    assert turns.ask("続き").endswith(PAGE_NOTE)
     clock.now += 601
-    link.reply = "新しい返事"
-    assert turns.ask("q2") == "新しい返事"
-    assert link.prompts == ["q1", "q2"]
+    _check_expired_then_new_turn(link, turns)
+
+
+@pytest.mark.parametrize("gap", [" \u3000\t\r\n", " \r\n\u3000"])
+def test_split_page_strips_blanks_at_the_cut(gap):
+    head = "あ" * 250 + ("。" if gap.startswith(" \u3000") else "")
+    assert split_page(head + gap + "い" * 200, PAGE_ROOM) == (head, "い" * 200)
+
+
+def test_blank_rest_is_not_held():
+    text = "あ" * 250 + "。"
+    link = FakeLink(reply=text + "\u3000\n" * 60)
+    turns = TurnManager(link, wait_s=2, max_chars=PAGE_CHARS)
+    assert turns.ask("q") == text
+    link.reply = "はい"
+    assert turns.ask("続き") == "はい"       # nothing is held
+    assert link.prompts == ["q", "続き"]
 
 
 def test_timeout_held_long_reply_is_paged():
@@ -191,7 +236,7 @@ def test_timeout_held_long_reply_is_paged():
     assert link.prompts == ["q1"]
 
 
-@pytest.mark.parametrize("reply", ["", "\n\n"])
+@pytest.mark.parametrize("reply", ["", "\n\n", "\u3000\r\t "])
 def test_empty_reply_gives_the_note(reply):
     assert TurnManager(FakeLink(reply=reply), wait_s=2).ask("q") == EMPTY_NOTE
 
@@ -239,7 +284,10 @@ def test_all_pages_a_rest_longer_than_all_max():
     assert link.prompts == ["q"]
 
 
-@pytest.mark.parametrize("prompt", ["明日の天気は", "次の東京の天気と明日の大阪の天気を教えてください"])
+@pytest.mark.parametrize("prompt", [
+    "明日の天気は", "次の東京の天気と明日の大阪の天気を教えてください", "手続きの方法は?", "次の予定は?",
+    "次回の会議はいつ", "目次を見せて", "もっと安い店は?", "全部屋の温度は?", "つぎはぎ", "続きはどうなった?",
+])
 def test_new_question_drops_the_held_pages(prompt):
     link, turns = _first_page()
     link.reply = "新しい返事"
@@ -250,10 +298,13 @@ def test_new_question_drops_the_held_pages(prompt):
 
 
 @pytest.mark.parametrize("prompt, key", [
-    ("続き", "continue"), ("続きを見せて。", "continue"), ("\u3000つづき、！", "continue"), ("もっと", "continue"),
-    ("「終わり、まで」…", "all"), ("続きを全部", "all"), ("さいごまで", "all"),
-    ("次の東京の天気と明日の大阪の天気を教えてください", None), ("天気は", None), ("", None),
-    ("続きの話はまた今度にしましょうね", None),
+    *[(p, "continue") for p in ("続き", "続きを見せて。", "\u3000つづき、！", "次", "次のページ", "つぎ", "もっと",
+                                "もっと見せて")],
+    *[(p, "all") for p in ("終わりまで", "最後まで読んで", "全部お願い", "全文", "続きを全部", "「終わり、まで」…",
+                           "さいごまで", "続き全部", "残り全部", "残り")],
+    *[(p, None) for p in ("手続きの方法は?", "次の予定は?", "次回の会議はいつ", "目次を見せて", "もっと安い店は?",
+                          "全部屋の温度は?", "つぎはぎ", "続きはどうなった?",
+                          "次の東京の天気と明日の大阪の天気を教えてください", "天気は", "", "続きの話はまた今度にしましょうね")],
 ])
 def test_page_key(prompt, key):
     assert page_key(prompt) == key

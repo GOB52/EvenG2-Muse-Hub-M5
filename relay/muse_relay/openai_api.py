@@ -47,18 +47,22 @@ def clip(text: str, limit: int = MAX_CHARS) -> str:
 
 
 PAGE_BREAKS = ("。", "！", "？", "\n")
+BLANK_CHARS = " \t\n\r\u3000"    # blank for paging and the empty-reply note, as on the hub
 
 
 def split_page(text: str, room: int) -> tuple[str, str]:
-    """The first page of at most room characters and the rest. The cut goes right after the last
-    "。", "！", "？" or newline in the page's last 20%, else at room characters."""
+    """The first page of at most room characters and the rest, both without blanks at the cut. The
+    cut goes right after the last "。", "！", "？" or newline in the page's last 20%, else at room
+    characters. Blanks before the text are dropped before cutting."""
     if len(text) <= room:
         return text, ""
-    head = text[:room]
-    cut = max(head.rfind(c) for c in PAGE_BREAKS) + 1
-    if cut <= room - room // 5:
-        cut = room
-    return head[:cut].rstrip("\n"), text[cut:].lstrip("\n")
+    text = text.lstrip(BLANK_CHARS)
+    cut = len(text)
+    if cut > room:
+        cut = max(text[:room].rfind(c) for c in PAGE_BREAKS) + 1
+        if cut <= room - room // 5:
+            cut = room
+    return text[:cut].rstrip(BLANK_CHARS), text[cut:].lstrip(BLANK_CHARS)
 
 
 def check_auth(header: str, token: str) -> bool:
