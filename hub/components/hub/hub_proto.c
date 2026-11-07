@@ -170,7 +170,10 @@ void hub_proto_clip(const char *in, char *out, const size_t out_len, const size_
     size_t bytes = 0;
     size_t chars = 0;
     while (in[bytes] && chars < keep_chars) {
-        bytes += seq_len((unsigned char)in[bytes]);
+        bytes++;                       /* one character per lead byte, then its continuation bytes */
+        while (in[bytes] && is_continuation((unsigned char)in[bytes])) {
+            bytes++;
+        }
         chars++;
     }
     const size_t room = out_len - 1 - (cut ? sizeof(ELLIPSIS) - 1 : 0);

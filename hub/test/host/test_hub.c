@@ -91,6 +91,12 @@ static void test_clip(void)
     CHECK(strcmp(out, "あいうえ…") == 0);
     hub_proto_clip("abcdef", out, 5, 10);      /* out too small: stays valid UTF-8 and terminated */
     CHECK(strlen(out) <= 4);
+    hub_proto_clip("\xE3" "a", out, sizeof(out), 10);   /* lead byte without its continuation bytes */
+    CHECK(strlen(out) == 2);
+    hub_proto_clip("\xE3", out, sizeof(out), 10);
+    CHECK(strcmp(out, "") == 0);
+    hub_proto_clip("\xE3" "a" "\xE3", out, sizeof(out), 1);
+    CHECK(strlen(out) < sizeof(out));
 }
 
 static void test_completion_json(void)
