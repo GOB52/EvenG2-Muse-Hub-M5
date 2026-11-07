@@ -21,7 +21,7 @@ class LinkError(Exception):
 
 class _Turn:
     def __init__(self) -> None:
-        self.pieces: list[str] = []
+        self.partial_text = ""     # the latest snapshot of the reply so far
         self.reply = ""
         self.error: Optional[str] = None
         self.finished = False
@@ -32,7 +32,7 @@ class _Turn:
         return self.error if self.error is not None else self.reply
 
     def partial(self) -> str:
-        return "".join(self.pieces)
+        return self.partial_text
 
 
 class TurnManager:
@@ -70,7 +70,7 @@ class TurnManager:
 
     def _run(self, turn: _Turn, text: str) -> None:
         try:
-            turn.reply = self._link.run_turn(text, turn.pieces.append)
+            turn.reply = self._link.run_turn(text, lambda partial: setattr(turn, "partial_text", partial))
         except LinkError as e:
             turn.error = str(e)
         except Exception:

@@ -2,7 +2,7 @@ import types
 
 import pytest
 
-from muse_relay.board_link import MSG_BUSY, MSG_INTERNAL, BoardLink, sdk_tools_dir
+from muse_relay.board_link import MSG_BUSY, MSG_INTERNAL, BoardLink, _load_chat, sdk_tools_dir
 from muse_relay.turns import LinkError
 
 
@@ -36,6 +36,7 @@ def make_chat(frames=(), reply_text="返事", error=None, exc=None):
             self.closed = True
 
     mod.BoardError = BoardError
+    mod.Reply = _load_chat().Reply          # the SDK's own accumulator
     mod.Board = Board
     return mod
 
@@ -50,7 +51,7 @@ def test_run_turn_returns_reply_and_forwards_text_pieces():
     link = BoardLink("/dev/x", chat_module=chat)
     pieces = []
     assert link.run_turn("q", pieces.append) == "返事"
-    assert pieces == ["返", "事"]
+    assert pieces == ["返", "返事"]          # each call carries the whole partial text so far
 
 
 def test_board_is_opened_once():
@@ -112,3 +113,13 @@ def test_muse_side_error_keeps_the_port_open():
             link.run_turn("q", lambda _: None)
         assert str(e.value) == "Muse に届きませんでした (Muse: network error)。"
     assert chat.Board.opened == ["/dev/x"]
+
+
+def test_final_replaces_streamed_pieces_and_messages_are_joined():
+    chat = make_chat(frames=[{"type": "text", "msg": 1, "text": "ab"},
+                             {"type": "final", "msg": 1, "text": "ABC"},
+                             {"type": "text", "msg": 2, "text": "d"}])
+    link = BoardLink("/dev/x", chat_module=chat)
+    seen = []
+    link.run_turn("q", seen.append)
+    assert seen == ["ab", "ABC", "ABC\n\nd"]

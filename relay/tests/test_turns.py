@@ -60,6 +60,13 @@ def test_slow_reply_returns_partial_then_held_reply():
     assert link.prompts == ["q1"]          # the held reply was returned instead of sending "続き"
 
 
+def test_partial_is_the_latest_snapshot_not_a_concatenation():
+    link = FakeLink(reply="全文", pieces=("あ", "あい", "あいう"), auto=False)
+    turns = TurnManager(link, wait_s=1.0)
+    assert turns.ask("q1") == "あいう\n" + CONTINUE_NOTE
+    link.release()
+
+
 def test_slow_reply_without_partial_returns_note_only():
     link = FakeLink(auto=False)
     turns = TurnManager(link, wait_s=0.2)

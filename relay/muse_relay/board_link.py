@@ -48,10 +48,12 @@ class BoardLink:
         with self._lock:
             try:
                 board = self._open()
+                reply = self._chat.Reply()
 
                 def progress(frame: dict) -> None:
-                    if frame.get("type") == "text":
-                        on_text(frame.get("text", ""))
+                    reply.feed(frame)
+                    if frame.get("type") in ("text", "final"):
+                        on_text(reply.text)       # the whole partial text so far
 
                 return board.chat(text, progress).text
             except (self._chat.BoardError, OSError) as e:
