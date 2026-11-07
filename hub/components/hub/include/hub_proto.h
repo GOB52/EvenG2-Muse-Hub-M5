@@ -43,6 +43,13 @@ void hub_proto_clip(const char *in, char *out, size_t out_len, size_t max_chars)
  */
 size_t hub_proto_page_cut(const char *text, size_t room);
 
+/* Blank characters: space, \t, \n, \r and U+3000 (ideographic space). */
+bool hub_proto_is_blank(const char *s);
+/* Bytes of the blank characters s starts with. */
+size_t hub_proto_blank_len(const char *s);
+/* The length of s's first n bytes without the blank characters they end with. */
+size_t hub_proto_unblank_len(const char *s, size_t n);
+
 typedef enum {
     HUB_KEY_NONE = 0,              /* a new question */
     HUB_KEY_CONTINUE,              /* the next page: "続き", "次", ... */
@@ -50,8 +57,9 @@ typedef enum {
 } hub_key_t;
 
 /*
- * What a prompt asks of held pages. Spaces and punctuation are ignored; a prompt left with more than
- * 12 characters is a new question. An ALL word wins over a CONTINUE word.
+ * What a prompt asks of held pages. Spaces and punctuation are ignored; what is left must be one of
+ * the paging words followed by one of the allowed suffixes ("続き", "次のページ", "最後まで読んで"),
+ * else it is a new question. ALL words are tried first.
  */
 hub_key_t hub_proto_page_key(const char *prompt);
 

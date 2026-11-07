@@ -192,15 +192,64 @@ void hub_proto_clip(const char *in, char *out, const size_t out_len, const size_
     }
 }
 
-/* Words that ask for held pages; edit here. */
-static const char *const PAGE_ALL_WORDS[] = {"終わりまで", "おわりまで", "最後まで", "さいごまで", "全部", "ぜんぶ", "全文"};
+#define IDEOGRAPHIC_SPACE "\xE3\x80\x80"   /* U+3000 */
+#define IDEOGRAPHIC_SPACE_LEN (sizeof(IDEOGRAPHIC_SPACE) - 1)
+
+/* Bytes of the blank character s starts with; 0 if it starts with none. */
+static size_t blank_at(const char *s)
+{
+    if (is_space(*s)) {
+        return 1;
+    }
+    return strncmp(s, IDEOGRAPHIC_SPACE, IDEOGRAPHIC_SPACE_LEN) == 0 ? IDEOGRAPHIC_SPACE_LEN : 0;
+}
+
+size_t hub_proto_blank_len(const char *s)
+{
+    size_t n = 0;
+    for (size_t b = blank_at(s); b > 0; b = blank_at(s + n)) {
+        n += b;
+    }
+    return n;
+}
+
+bool hub_proto_is_blank(const char *s)
+{
+    return s[hub_proto_blank_len(s)] == '\0';
+}
+
+size_t hub_proto_unblank_len(const char *s, size_t n)
+{
+    while (n > 0) {
+        if (is_space(s[n - 1])) {
+            n--;
+        } else if (n >= IDEOGRAPHIC_SPACE_LEN &&
+                   memcmp(s + n - IDEOGRAPHIC_SPACE_LEN, IDEOGRAPHIC_SPACE, IDEOGRAPHIC_SPACE_LEN) == 0) {
+            n -= IDEOGRAPHIC_SPACE_LEN;
+        } else {
+            break;
+        }
+    }
+    return n;
+}
+
+/* Words that ask for held pages, and what may follow them; edit here. */
+static const char *const PAGE_ALL_WORDS[] = {
+    "終わりまで", "おわりまで", "最後まで", "さいごまで", "全部", "ぜんぶ", "全文",
+    "続きを全部", "続き全部", "残り全部", "残り",
+};
 static const char *const PAGE_CONTINUE_WORDS[] = {"続き", "つづき", "続けて", "つづけて", "次", "つぎ", "もっと"};
+static const char *const PAGE_KEY_SUFFIXES[] = {
+    "", "を", "を見せて", "をみせて", "を教えて", "をおしえて", "をお願い", "をおねがい", "をください",
+    "お願い", "おねがい", "見せて", "みせて", "して", "のページ", "ページ", "読んで", "よんで",
+    "を読んで", "をよんで",
+};
 /* Ignored when matching them: spaces and punctuation. */
 static const char *const PAGE_KEY_IGNORED[] = {
     " ", "\t", "\n", "\r", "　", "。", "、", "．", "，", "！", "？", "!", "?", ".", ",",
     "「", "」", "『", "』", "…", "ー", "〜", "~",
 };
-#define PAGE_KEY_MAX_CHARS 12
+#define PAGE_KEY_MAX 64            /* bytes of a key; more than any word with a suffix */
 #define COUNT_OF(a) (sizeof(a) / sizeof((a)[0]))
 
 static bool is_one_of(const char *c, const size_t n, const char *const *set, const size_t count)
@@ -213,50 +262,62 @@ static bool is_one_of(const char *c, const size_t n, const char *const *set, con
     return false;
 }
 
-static bool contains_any(const char *s, const char *const *words, const size_t count)
-{
-    for (size_t i = 0; i < count; i++) {
-        if (strstr(s, words[i])) {
-            return true;
-        }
-    }
-    return false;
-}
-
-/* prompt without the ignored characters; false if that leaves more than PAGE_KEY_MAX_CHARS. */
-static bool page_key_text(const char *prompt, char *key, const size_t cap)
+/* text without the ignored characters; false if that does not fit in cap bytes. */
+static bool page_key_text(const char *text, char *key, const size_t cap)
 {
     size_t used = 0;
-    size_t chars = 0;
-    for (size_t i = 0; prompt[i];) {
+    for (size_t i = 0; text[i];) {
         const size_t start = i++;
-        while (prompt[i] && is_continuation((unsigned char)prompt[i])) {
+        while (text[i] && is_continuation((unsigned char)text[i])) {
             i++;
         }
         const size_t n = i - start;
-        if (is_one_of(prompt + start, n, PAGE_KEY_IGNORED, COUNT_OF(PAGE_KEY_IGNORED))) {
+        if (is_one_of(text + start, n, PAGE_KEY_IGNORED, COUNT_OF(PAGE_KEY_IGNORED))) {
             continue;
         }
-        if (++chars > PAGE_KEY_MAX_CHARS || used + n >= cap) {
+        if (used + n >= cap) {
             return false;
         }
-        memcpy(key + used, prompt + start, n);
+        memcpy(key + used, text + start, n);
         used += n;
     }
     key[used] = '\0';
     return true;
 }
 
+/* The suffixes are compared without the ignored characters too ("ページ" has a "ー"). */
+static bool is_suffix(const char *rest)
+{
+    char suffix[PAGE_KEY_MAX];
+    for (size_t i = 0; i < COUNT_OF(PAGE_KEY_SUFFIXES); i++) {
+        if (page_key_text(PAGE_KEY_SUFFIXES[i], suffix, sizeof(suffix)) && strcmp(rest, suffix) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool is_word_with_suffix(const char *key, const char *const *words, const size_t count)
+{
+    for (size_t i = 0; i < count; i++) {
+        const size_t n = strlen(words[i]);
+        if (strncmp(key, words[i], n) == 0 && is_suffix(key + n)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 hub_key_t hub_proto_page_key(const char *prompt)
 {
-    char key[PAGE_KEY_MAX_CHARS * 4 + 1];
+    char key[PAGE_KEY_MAX];
     if (!page_key_text(prompt, key, sizeof(key))) {
         return HUB_KEY_NONE;
     }
-    if (contains_any(key, PAGE_ALL_WORDS, COUNT_OF(PAGE_ALL_WORDS))) {
+    if (is_word_with_suffix(key, PAGE_ALL_WORDS, COUNT_OF(PAGE_ALL_WORDS))) {
         return HUB_KEY_ALL;
     }
-    if (contains_any(key, PAGE_CONTINUE_WORDS, COUNT_OF(PAGE_CONTINUE_WORDS))) {
+    if (is_word_with_suffix(key, PAGE_CONTINUE_WORDS, COUNT_OF(PAGE_CONTINUE_WORDS))) {
         return HUB_KEY_CONTINUE;
     }
     return HUB_KEY_NONE;

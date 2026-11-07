@@ -25,6 +25,7 @@ extern const char HUB_STILL_WORKING[];
 extern const char HUB_CONTINUE_NOTE[];
 extern const char HUB_PAGE_NOTE[];
 extern const char HUB_EMPTY_NOTE[];
+extern const char HUB_EXPIRED_NOTE[];
 extern const char HUB_MSG_BUSY[];
 extern const char HUB_MSG_NOT_SET_UP[];
 extern const char HUB_MSG_INTERNAL[];
@@ -32,7 +33,8 @@ extern const char HUB_MSG_INTERNAL[];
 /*
  * A turn still running after cap_ms is treated as failed by the next ask(). A reply longer than
  * max_chars characters is paged and the rest held: "続き" returns the next page, "終わりまで" the rest
- * up to all_max_chars, and any other prompt drops it and starts a new turn.
+ * up to all_max_chars, and any other prompt drops it and starts a new turn. After hold_ms the held
+ * text is dropped; a paging prompt then gets HUB_EXPIRED_NOTE until the next new turn.
  */
 void hub_turns_init(const hub_turns_ops_t *ops, int wait_ms, int64_t hold_ms, int64_t cap_ms, size_t max_chars,
                     size_t all_max_chars);

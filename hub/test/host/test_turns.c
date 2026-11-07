@@ -261,17 +261,64 @@ static void test_slow_reply_is_partial_then_held(void)
     CHECK(strcmp(out, "はい、送るよ。") == 0);
 }
 
+#define HOLD_MS 600000
+
+/* After an expired hold, a paging word gets the note (nothing is sent); a new question clears it. */
+static void check_expired_then_new_turn(void)
+{
+    char out[HUB_REPLY_MAX];
+    s_script = "fast";
+    hub_turns_ask("続き", out, sizeof(out));
+    CHECK(strcmp(out, HUB_EXPIRED_NOTE) == 0);
+    CHECK(s_prompt_count == 1);
+    hub_turns_ask("終わりまで", out, sizeof(out));
+    CHECK(strcmp(out, HUB_EXPIRED_NOTE) == 0);
+    CHECK(s_prompt_count == 1);
+    hub_turns_ask("q2", out, sizeof(out));
+    CHECK(strcmp(out, "はい、送るよ。") == 0);
+    CHECK(s_prompt_count == 2);
+    hub_turns_ask("続き", out, sizeof(out));   /* nothing is held: a question for Muse */
+    CHECK(strcmp(out, "はい、送るよ。") == 0);
+    CHECK(s_prompt_count == 3);
+    CHECK(strcmp(s_last_prompt, "続き") == 0);
+}
+
 static void test_held_reply_expires(void)
 {
     char out[HUB_REPLY_MAX];
     setup("slow");
     hub_turns_ask("q1", out, sizeof(out));
     hub_turns_on_event("done", "", NULL);
-    s_now += 600001;
-    s_script = "fast";
-    hub_turns_ask("q2", out, sizeof(out));
+    s_now += HOLD_MS + 1;
+    check_expired_then_new_turn();
+}
+
+static void test_continue_without_a_held_reply_goes_to_muse(void)
+{
+    char out[HUB_REPLY_MAX];
+    setup("fast");
+    hub_turns_ask("続き", out, sizeof(out));
     CHECK(strcmp(out, "はい、送るよ。") == 0);
-    CHECK(s_prompt_count == 2);
+    CHECK(s_prompt_count == 1);
+    CHECK(strcmp(s_last_prompt, "続き") == 0);
+}
+
+static void test_tiny_max_chars_does_not_underflow(void)
+{
+    char out[HUB_REPLY_MAX];
+    char want[HUB_REPLY_MAX];
+    char text[400];
+    setup_chars("slow", 10);
+    hub_turns_ask("q", out, sizeof(out));
+    snprintf(want, sizeof(want), "…\n%s", HUB_CONTINUE_NOTE);
+    CHECK(strcmp(out, want) == 0);
+    repeat(text, sizeof(text), "あ", 50);
+    setup_reply(text, 10);
+    hub_turns_ask("q", out, sizeof(out));
+    CHECK(valid_utf8(out) && hub_proto_utf8_chars(out) <= 10 && strncmp(out, "あ", 3) == 0);
+    hub_turns_ask("続き", out, sizeof(out));
+    CHECK(valid_utf8(out) && hub_proto_utf8_chars(out) <= 10 && strncmp(out, "あ", 3) == 0);
+    CHECK(s_prompt_count == 1);
 }
 
 static void test_events_without_a_turn_are_ignored(void)
@@ -464,6 +511,51 @@ static void test_page_split_ignores_an_early_sentence_end(void)
     CHECK(hub_proto_utf8_chars(out) == PAGE_CHARS);
 }
 
+static void check_split(const char *head, const char *gap, const char *tail)
+{
+    char text[2400];
+    char want[2400];
+    char out[HUB_REPLY_MAX];
+    snprintf(text, sizeof(text), "%s%s%s", head, gap, tail);
+    setup_reply(text, PAGE_CHARS);
+    hub_turns_ask("q", out, sizeof(out));
+    snprintf(want, sizeof(want), "%s\n%s", head, HUB_PAGE_NOTE);
+    CHECK(strcmp(out, want) == 0);
+    hub_turns_ask("続き", out, sizeof(out));
+    CHECK(strcmp(out, tail) == 0);
+}
+
+static void test_page_split_strips_blanks_at_the_cut(void)
+{
+    char head[1200];
+    char tail[1200];
+    repeat(head, sizeof(head), "あ", 250);
+    strcat(head, "。");
+    repeat(tail, sizeof(tail), "い", 200);
+    check_split(head, " 　\t\r\n", tail);
+    repeat(head, sizeof(head), "あ", 250);
+    check_split(head, " \r\n　", tail);      /* cut after the "\n": the blanks before it go too */
+}
+
+static void test_blank_rest_is_not_held(void)
+{
+    char text[2400];
+    char blanks[1200];
+    char want[1200];
+    char out[HUB_REPLY_MAX];
+    repeat(want, sizeof(want), "あ", 250);
+    strcat(want, "。");
+    repeat(blanks, sizeof(blanks), "　\n", 60);
+    snprintf(text, sizeof(text), "%s%s", want, blanks);
+    setup_reply(text, PAGE_CHARS);
+    hub_turns_ask("q", out, sizeof(out));
+    CHECK(strcmp(out, want) == 0);
+    s_script = "fast";
+    hub_turns_ask("続き", out, sizeof(out));   /* nothing is held */
+    CHECK(strcmp(out, "はい、送るよ。") == 0);
+    CHECK(s_prompt_count == 2);
+}
+
 static void test_page_split_strips_newlines_at_the_cut(void)
 {
     char text[2400];
@@ -491,11 +583,11 @@ static void test_held_page_expires(void)
     setup_reply(text, PAGE_CHARS);
     hub_turns_ask("q", out, sizeof(out));
     CHECK(ends_with_note(out));
-    s_now += 600001;
-    s_script = "fast";
-    hub_turns_ask("q2", out, sizeof(out));
-    CHECK(strcmp(out, "はい、送るよ。") == 0);
-    CHECK(s_prompt_count == 2);
+    s_now += HOLD_MS;                   /* still held at exactly the hold */
+    hub_turns_ask("続き", out, sizeof(out));
+    CHECK(ends_with_note(out));
+    s_now += HOLD_MS + 1;
+    check_expired_then_new_turn();
 }
 
 static void test_empty_reply_gives_the_note(void)
@@ -505,6 +597,9 @@ static void test_empty_reply_gives_the_note(void)
     hub_turns_ask("q", out, sizeof(out));
     CHECK(strcmp(out, HUB_EMPTY_NOTE) == 0);
     setup_reply("\n\n", MAX_CHARS);
+    hub_turns_ask("q", out, sizeof(out));
+    CHECK(strcmp(out, HUB_EMPTY_NOTE) == 0);
+    setup_reply("　\r\t ", MAX_CHARS);
     hub_turns_ask("q", out, sizeof(out));
     CHECK(strcmp(out, HUB_EMPTY_NOTE) == 0);
     setup("none");                    /* held after a timeout */
@@ -585,7 +680,10 @@ static void test_all_pages_a_rest_longer_than_all_max(void)
 
 static void test_new_question_drops_the_held_pages(void)
 {
-    static const char *const prompts[] = {"明日の天気は", "次の東京の天気と明日の大阪の天気を教えてください"};
+    static const char *const prompts[] = {
+        "明日の天気は", "次の東京の天気と明日の大阪の天気を教えてください", "手続きの方法は?", "次の予定は?",
+        "次回の会議はいつ", "目次を見せて", "もっと安い店は?", "全部屋の温度は?", "つぎはぎ", "続きはどうなった?",
+    };
     char text[4800];
     char out[HUB_REPLY_MAX];
     for (size_t i = 0; i < sizeof(prompts) / sizeof(prompts[0]); i++) {
@@ -609,6 +707,8 @@ void run_turns_tests(void)
     test_start_failure_is_internal_error();
     test_slow_reply_is_partial_then_held();
     test_held_reply_expires();
+    test_continue_without_a_held_reply_goes_to_muse();
+    test_tiny_max_chars_does_not_underflow();
     test_events_without_a_turn_are_ignored();
     test_no_partial_is_the_note_only();
     test_long_partial_keeps_the_note();
@@ -617,6 +717,8 @@ void run_turns_tests(void)
     test_page_split_prefers_a_sentence_end();
     test_page_split_ignores_an_early_sentence_end();
     test_page_split_strips_newlines_at_the_cut();
+    test_page_split_strips_blanks_at_the_cut();
+    test_blank_rest_is_not_held();
     test_held_page_expires();
     test_empty_reply_gives_the_note();
     test_continue_words_give_the_next_page();

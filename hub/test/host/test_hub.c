@@ -111,17 +111,38 @@ static void test_page_cut(void)
 
 static void test_page_key(void)
 {
-    CHECK(hub_proto_page_key("続き") == HUB_KEY_CONTINUE);
-    CHECK(hub_proto_page_key("続きを見せて。") == HUB_KEY_CONTINUE);
-    CHECK(hub_proto_page_key("　つづき、！") == HUB_KEY_CONTINUE);   /* full-width space */
-    CHECK(hub_proto_page_key("もっと") == HUB_KEY_CONTINUE);
-    CHECK(hub_proto_page_key("「終わり、まで」…") == HUB_KEY_ALL);
-    CHECK(hub_proto_page_key("続きを全部") == HUB_KEY_ALL);
-    CHECK(hub_proto_page_key("さいごまで") == HUB_KEY_ALL);
-    CHECK(hub_proto_page_key("次の東京の天気と明日の大阪の天気を教えてください") == HUB_KEY_NONE);
-    CHECK(hub_proto_page_key("天気は") == HUB_KEY_NONE);
-    CHECK(hub_proto_page_key("") == HUB_KEY_NONE);
-    CHECK(hub_proto_page_key("続きの話はまた今度にしましょうね") == HUB_KEY_NONE);   /* 16 characters */
+    static const char *const continues[] = {
+        "続き", "続きを見せて。", "　つづき、！", "次", "次のページ", "つぎ", "もっと", "もっと見せて",
+    };
+    static const char *const alls[] = {
+        "終わりまで", "最後まで読んで", "全部お願い", "全文", "続きを全部", "「終わり、まで」…", "さいごまで",
+        "続き全部", "残り全部", "残り",
+    };
+    static const char *const others[] = {
+        "手続きの方法は?", "次の予定は?", "次回の会議はいつ", "目次を見せて", "もっと安い店は?", "全部屋の温度は?",
+        "つぎはぎ", "続きはどうなった?", "次の東京の天気と明日の大阪の天気を教えてください", "天気は", "",
+        "続きの話はまた今度にしましょうね",
+    };
+    for (size_t i = 0; i < sizeof(continues) / sizeof(continues[0]); i++) {
+        CHECK(hub_proto_page_key(continues[i]) == HUB_KEY_CONTINUE);
+    }
+    for (size_t i = 0; i < sizeof(alls) / sizeof(alls[0]); i++) {
+        CHECK(hub_proto_page_key(alls[i]) == HUB_KEY_ALL);
+    }
+    for (size_t i = 0; i < sizeof(others) / sizeof(others[0]); i++) {
+        CHECK(hub_proto_page_key(others[i]) == HUB_KEY_NONE);
+    }
+}
+
+static void test_blank(void)
+{
+    CHECK(hub_proto_is_blank(""));
+    CHECK(hub_proto_is_blank(" \t\r\n　"));
+    CHECK(!hub_proto_is_blank("　あ"));
+    CHECK(hub_proto_blank_len("\n　 あ") == 5);
+    CHECK(hub_proto_blank_len("あ") == 0);
+    CHECK(hub_proto_unblank_len("あ\r\n　", 8) == 3);
+    CHECK(hub_proto_unblank_len("　", 3) == 0);
 }
 
 static void test_completion_json(void)
@@ -166,6 +187,7 @@ int main(void)
     RUN(test_clip);
     RUN(test_page_cut);
     RUN(test_page_key);
+    RUN(test_blank);
     RUN(test_completion_json);
     RUN(test_completion_sse);
     run_turns_tests();

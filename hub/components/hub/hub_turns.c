@@ -23,6 +23,7 @@ const char HUB_STILL_WORKING[] = "まだ考え中です。少ししてからも�
 const char HUB_CONTINUE_NOTE[] = "(まだ考え中です。「続き」と話しかけると続きを返します)";
 const char HUB_PAGE_NOTE[] = "(続きは「続き」、残り全部は「終わりまで」と話しかけてください)";
 const char HUB_EMPTY_NOTE[] = "(Muse の返事にテキストがありませんでした。リンクや画像はガジェットに届きません)";
+const char HUB_EXPIRED_NOTE[] = "(続きの保持は期限切れです。もう一度質問してください)";
 const char HUB_MSG_BUSY[] = "StickS3 で音声の会話中です。終わってからもう一度どうぞ。";
 const char HUB_MSG_NOT_SET_UP[] = "Muse が未設定です。ペアリングを確認してください。";
 const char HUB_MSG_INTERNAL[] = "Muse に届きませんでした (内部エラー)。";
@@ -50,6 +51,7 @@ static char s_error[ERROR_MAX];    /* non-empty: the turn failed */
 static HUB_PSRAM_BSS char s_held[HUB_REPLY_MAX];
 static bool s_has_held;
 static int64_t s_held_at;
+static bool s_held_expired;        /* the held reply expired; cleared by the next new turn */
 
 static void msgs_reset(void)
 {
@@ -69,7 +71,7 @@ void hub_turns_init(const hub_turns_ops_t *ops, const int wait_ms, const int64_t
     s_cap_ms = cap_ms;
     s_max_chars = max_chars;
     s_all_max_chars = all_max_chars;
-    s_running = s_finished = s_detached = s_has_held = s_sent = false;
+    s_running = s_finished = s_detached = s_has_held = s_held_expired = s_sent = false;
     s_error[0] = '\0';
     msgs_reset();
 }
@@ -156,16 +158,6 @@ static void build(char *out, const size_t cap)
     }
 }
 
-static bool is_blank(const char *s)
-{
-    for (; *s; s++) {
-        if (*s != ' ' && *s != '\t' && *s != '\n' && *s != '\r') {
-            return false;
-        }
-    }
-    return true;
-}
-
 /* The finished turn's reply. A reply without text (Muse sent only a link or a card) gets a note. */
 static void result(char *out, const size_t cap)
 {
@@ -174,7 +166,7 @@ static void result(char *out, const size_t cap)
         return;
     }
     build(out, cap);
-    if (is_blank(out)) {
+    if (hub_proto_is_blank(out)) {
         snprintf(out, cap, "%s", HUB_EMPTY_NOTE);
     }
 }
@@ -250,6 +242,13 @@ bool hub_turns_busy(void)
     return busy;
 }
 
+/* Characters left for the text when "\n" + note must also fit in limit; at least 1. */
+static size_t note_room(const size_t limit, const char *note)
+{
+    const size_t need = hub_proto_utf8_chars(note) + 1;
+    return limit > need ? limit - need : 1;
+}
+
 /* partial clipped so that "partial\nNOTE" fits the card. */
 static void with_note(const char *partial, char *out, const size_t out_len)
 {
@@ -257,7 +256,7 @@ static void with_note(const char *partial, char *out, const size_t out_len)
         snprintf(out, out_len, "%s", HUB_CONTINUE_NOTE);
         return;
     }
-    const size_t room = s_max_chars - hub_proto_utf8_chars(HUB_CONTINUE_NOTE) - 1;
+    const size_t room = note_room(s_max_chars, HUB_CONTINUE_NOTE);
     char *clipped = hub_mem_alloc(HUB_REPLY_MAX);
     if (!clipped) {
         snprintf(out, out_len, "%s", HUB_CONTINUE_NOTE);
@@ -270,28 +269,24 @@ static void with_note(const char *partial, char *out, const size_t out_len)
 
 /*
  * Leaves the first page (at most limit characters) of a finished reply in out, followed by
- * "\nPAGE_NOTE" when more is left, and holds the rest for the next ask(). Call with the lock held.
+ * "\nPAGE_NOTE" when more is left, and holds the rest for the next ask(). Blanks at the cut are
+ * dropped, and a blank rest is not held. Call with the lock held.
  */
 static void page(char *out, const size_t out_len, const size_t limit)
 {
     if (hub_proto_utf8_chars(out) <= limit) {
         return;
     }
-    const size_t note = hub_proto_utf8_chars(HUB_PAGE_NOTE) + 1;
-    const size_t room = limit > note ? limit - note : 1;
-    size_t cut = hub_proto_page_cut(out, room);
-    const char *rest = out + cut;
-    while (*rest == '\n') {
-        rest++;
-    }
-    snprintf(s_held, sizeof(s_held), "%s", rest);
+    const char *text = out + hub_proto_blank_len(out);
+    const size_t cut = hub_proto_page_cut(text, note_room(limit, HUB_PAGE_NOTE));
+    const char *rest = text + cut;
+    snprintf(s_held, sizeof(s_held), "%s", rest + hub_proto_blank_len(rest));
     hub_proto_utf8_trim(s_held);
     s_has_held = s_held[0] != '\0';
     s_held_at = s_ops->now_ms();
-    while (cut > 0 && out[cut - 1] == '\n') {
-        cut--;
-    }
-    out[cut] = '\0';
+    const size_t n = hub_proto_unblank_len(text, cut);
+    memmove(out, text, n);
+    out[n] = '\0';
     if (s_has_held) {
         append(out, out_len, "\n");
         append(out, out_len, HUB_PAGE_NOTE);
@@ -310,18 +305,35 @@ static void finish(char *out, const size_t out_len, const size_t limit)
     }
 }
 
+/* Drops a held reply older than the hold and remembers that it expired. Call with the lock held. */
+static void expire_held(void)
+{
+    if (s_has_held && s_ops->now_ms() - s_held_at > s_hold_ms) {
+        s_has_held = false;
+        s_held[0] = '\0';
+        s_held_expired = true;
+    }
+}
+
 /*
  * The held reply's next page if prompt asks for one ("続き": a page, "終わりまで": the rest up to
- * all_max_chars). Any other prompt drops the held reply. Call with the lock held.
+ * all_max_chars), or HUB_EXPIRED_NOTE if it expired. Any other prompt drops the held reply.
+ * Call with the lock held.
  */
 static bool take_held(const char *prompt, char *out, const size_t out_len, size_t *limit)
 {
-    if (!s_has_held) {
+    expire_held();
+    const hub_key_t key = hub_proto_page_key(prompt);
+    const bool had = s_has_held;
+    s_has_held = false;
+    if (key == HUB_KEY_NONE) {
         return false;
     }
-    s_has_held = false;
-    const hub_key_t key = hub_proto_page_key(prompt);
-    if (key == HUB_KEY_NONE || s_ops->now_ms() - s_held_at > s_hold_ms) {
+    if (s_held_expired) {
+        snprintf(out, out_len, "%s", HUB_EXPIRED_NOTE);
+        return true;
+    }
+    if (!had) {
         return false;
     }
     *limit = key == HUB_KEY_ALL ? s_all_max_chars : s_max_chars;
@@ -349,7 +361,7 @@ void hub_turns_ask(const char *prompt, char *out, const size_t out_len)
     }
     msgs_reset();
     s_error[0] = '\0';
-    s_finished = s_detached = s_sent = false;
+    s_finished = s_detached = s_sent = s_held_expired = false;
     s_running = true;
     s_started_at = s_ops->now_ms();
     s_ops->reset_done();
