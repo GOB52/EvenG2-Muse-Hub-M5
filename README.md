@@ -26,7 +26,7 @@ G2「Hey Even …」→ iPhone の Even アプリ (STT は Even のクラウド)
 ## StickS3 (hub) のビルドと書き込み
 
 ```sh
-git clone --recursive <this repo>        # 既存 clone なら: git submodule update --init
+git clone --recursive https://github.com/GOB52/EvenG2-Muse-Hub-M5.git  # 既存 clone なら: git submodule update --init
 . <esp-idf v6.0.3>/export.sh             # eim なら activate_idf_v6.0.3.sh
 
 # トークンを書く (git-ignored。下の「トークン」を参照)

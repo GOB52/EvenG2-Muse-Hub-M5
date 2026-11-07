@@ -29,7 +29,7 @@ and "Localizing the keywords and notes".
 ## Building and flashing the StickS3 (hub)
 
 ```sh
-git clone --recursive <this repo>        # existing clone: git submodule update --init
+git clone --recursive https://github.com/GOB52/EvenG2-Muse-Hub-M5.git  # existing clone: git submodule update --init
 . <esp-idf v6.0.3>/export.sh             # with eim: activate_idf_v6.0.3.sh
 
 # write the tokens (git-ignored; see "Tokens" below)
