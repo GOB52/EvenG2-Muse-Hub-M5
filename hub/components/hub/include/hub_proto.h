@@ -43,6 +43,18 @@ void hub_proto_clip(const char *in, char *out, size_t out_len, size_t max_chars)
  */
 size_t hub_proto_page_cut(const char *text, size_t room);
 
+typedef enum {
+    HUB_KEY_NONE = 0,              /* a new question */
+    HUB_KEY_CONTINUE,              /* the next page: "続き", "次", ... */
+    HUB_KEY_ALL,                   /* the rest at once: "終わりまで", "全部", ... */
+} hub_key_t;
+
+/*
+ * What a prompt asks of held pages. Spaces and punctuation are ignored; a prompt left with more than
+ * 12 characters is a new question. An ALL word wins over a CONTINUE word.
+ */
+hub_key_t hub_proto_page_key(const char *prompt);
+
 /* chat.completion JSON / SSE stream for text. cJSON_malloc'd; free with hub_proto_free(). NULL on no memory. */
 char *hub_proto_completion_json(const char *text, const char *model, long created, const char *id);
 char *hub_proto_completion_sse(const char *text, const char *model, long created, const char *id);

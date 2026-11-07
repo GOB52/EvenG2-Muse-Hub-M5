@@ -109,6 +109,21 @@ static void test_page_cut(void)
     CHECK(hub_proto_page_cut("abcdefgh\nij", 10) == 9);
 }
 
+static void test_page_key(void)
+{
+    CHECK(hub_proto_page_key("続き") == HUB_KEY_CONTINUE);
+    CHECK(hub_proto_page_key("続きを見せて。") == HUB_KEY_CONTINUE);
+    CHECK(hub_proto_page_key("　つづき、！") == HUB_KEY_CONTINUE);   /* full-width space */
+    CHECK(hub_proto_page_key("もっと") == HUB_KEY_CONTINUE);
+    CHECK(hub_proto_page_key("「終わり、まで」…") == HUB_KEY_ALL);
+    CHECK(hub_proto_page_key("続きを全部") == HUB_KEY_ALL);
+    CHECK(hub_proto_page_key("さいごまで") == HUB_KEY_ALL);
+    CHECK(hub_proto_page_key("次の東京の天気と明日の大阪の天気を教えてください") == HUB_KEY_NONE);
+    CHECK(hub_proto_page_key("天気は") == HUB_KEY_NONE);
+    CHECK(hub_proto_page_key("") == HUB_KEY_NONE);
+    CHECK(hub_proto_page_key("続きの話はまた今度にしましょうね") == HUB_KEY_NONE);   /* 16 characters */
+}
+
 static void test_completion_json(void)
 {
     char *s = hub_proto_completion_json("返事", "openclaw", 123, "chatcmpl-x");
@@ -150,6 +165,7 @@ int main(void)
     RUN(test_utf8_helpers);
     RUN(test_clip);
     RUN(test_page_cut);
+    RUN(test_page_key);
     RUN(test_completion_json);
     RUN(test_completion_sse);
     run_turns_tests();

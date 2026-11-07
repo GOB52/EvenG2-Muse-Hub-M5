@@ -30,4 +30,11 @@ menu "Muse hub (Even AI endpoint)"
             The G2 scrolls. A longer reply is split into pages; saying
             "続き" returns the next one.
 
+    config HUB_ALL_MAX_CHARS
+        int "Characters returned at once for the rest of a reply"
+        default 5000
+        range 300 5000
+        help
+            Characters returned at once for 「終わりまで」/「全部」; the G2 scrolls.
+
 endmenu

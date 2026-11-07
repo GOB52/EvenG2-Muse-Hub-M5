@@ -21,7 +21,7 @@
 
 const char HUB_STILL_WORKING[] = "まだ考え中です。少ししてからもう一度話しかけてください。";
 const char HUB_CONTINUE_NOTE[] = "(まだ考え中です。もう一度話しかけると続きを返します)";
-const char HUB_PAGE_NOTE[] = "(続きは「続き」と話しかけてください)";
+const char HUB_PAGE_NOTE[] = "(続きは「続き」、残り全部は「終わりまで」と話しかけてください)";
 const char HUB_EMPTY_NOTE[] = "(Muse の返事にテキストがありませんでした。リンクや画像はガジェットに届きません)";
 const char HUB_MSG_BUSY[] = "StickS3 で音声の会話中です。終わってからもう一度どうぞ。";
 const char HUB_MSG_NOT_SET_UP[] = "Muse が未設定です。ペアリングを確認してください。";
@@ -39,6 +39,7 @@ static int s_wait_ms;
 static int64_t s_hold_ms;
 static int64_t s_cap_ms;
 static size_t s_max_chars;
+static size_t s_all_max_chars;
 static int64_t s_started_at;
 static bool s_running;
 static bool s_finished;
@@ -59,13 +60,15 @@ static void msgs_reset(void)
 }
 
 void hub_turns_init(const hub_turns_ops_t *ops, const int wait_ms, const int64_t hold_ms, const int64_t cap_ms,
-                    const size_t max_chars)
+                    const size_t max_chars, const size_t all_max_chars)
 {
+
     s_ops = ops;
     s_wait_ms = wait_ms;
     s_hold_ms = hold_ms;
     s_cap_ms = cap_ms;
     s_max_chars = max_chars;
+    s_all_max_chars = all_max_chars;
     s_running = s_finished = s_detached = s_has_held = s_sent = false;
     s_error[0] = '\0';
     msgs_reset();
@@ -266,16 +269,16 @@ static void with_note(const char *partial, char *out, const size_t out_len)
 }
 
 /*
- * Leaves the first page of a finished reply in out, followed by "\nPAGE_NOTE" when more is left,
- * and holds the rest for the next ask(). Call with the lock held.
+ * Leaves the first page (at most limit characters) of a finished reply in out, followed by
+ * "\nPAGE_NOTE" when more is left, and holds the rest for the next ask(). Call with the lock held.
  */
-static void page(char *out, const size_t out_len)
+static void page(char *out, const size_t out_len, const size_t limit)
 {
-    if (hub_proto_utf8_chars(out) <= s_max_chars) {
+    if (hub_proto_utf8_chars(out) <= limit) {
         return;
     }
     const size_t note = hub_proto_utf8_chars(HUB_PAGE_NOTE) + 1;
-    const size_t room = s_max_chars > note ? s_max_chars - note : 1;
+    const size_t room = limit > note ? limit - note : 1;
     size_t cut = hub_proto_page_cut(out, room);
     const char *rest = out + cut;
     while (*rest == '\n') {
@@ -295,30 +298,46 @@ static void page(char *out, const size_t out_len)
     }
 }
 
-/* A safety clip: a page never exceeds max_chars. */
-static void finish(char *out, const size_t out_len)
+/* A safety clip: a page never exceeds limit characters. */
+static void finish(char *out, const size_t out_len, const size_t limit)
 {
     const size_t n = strlen(out) + 1;
     char *copy = hub_mem_alloc(n);
     if (copy) {
         memcpy(copy, out, n);
-        hub_proto_clip(copy, out, out_len, s_max_chars);
+        hub_proto_clip(copy, out, out_len, limit);
         hub_mem_free(copy);
     }
+}
+
+/*
+ * The held reply's next page if prompt asks for one ("続き": a page, "終わりまで": the rest up to
+ * all_max_chars). Any other prompt drops the held reply. Call with the lock held.
+ */
+static bool take_held(const char *prompt, char *out, const size_t out_len, size_t *limit)
+{
+    if (!s_has_held) {
+        return false;
+    }
+    s_has_held = false;
+    const hub_key_t key = hub_proto_page_key(prompt);
+    if (key == HUB_KEY_NONE || s_ops->now_ms() - s_held_at > s_hold_ms) {
+        return false;
+    }
+    *limit = key == HUB_KEY_ALL ? s_all_max_chars : s_max_chars;
+    snprintf(out, out_len, "%s", s_held);
+    page(out, out_len, *limit);
+    return true;
 }
 
 void hub_turns_ask(const char *prompt, char *out, const size_t out_len)
 {
     s_ops->lock();
-    if (s_has_held) {
-        s_has_held = false;
-        if (s_ops->now_ms() - s_held_at <= s_hold_ms) {
-            snprintf(out, out_len, "%s", s_held);
-            page(out, out_len);
-            s_ops->unlock();
-            finish(out, out_len);
-            return;
-        }
+    size_t limit = s_max_chars;
+    if (take_held(prompt, out, out_len, &limit)) {
+        s_ops->unlock();
+        finish(out, out_len, limit);
+        return;
     }
     if (s_running && s_ops->now_ms() - s_started_at > s_cap_ms) {
         s_running = false;         /* the turn never ended: give up on it */
@@ -348,9 +367,9 @@ void hub_turns_ask(const char *prompt, char *out, const size_t out_len)
     s_ops->lock();
     if (s_finished) {
         result(out, out_len);
-        page(out, out_len);
+        page(out, out_len, s_max_chars);
         s_ops->unlock();
-        finish(out, out_len);
+        finish(out, out_len, s_max_chars);
         return;
     }
     s_detached = true;

@@ -192,17 +192,78 @@ void hub_proto_clip(const char *in, char *out, const size_t out_len, const size_
     }
 }
 
-static const char *const PAGE_BREAKS[] = {"\xE3\x80\x82", "\xEF\xBC\x81", "\xEF\xBC\x9F", "\n"};  /* 。！？ */
+/* Words that ask for held pages; edit here. */
+static const char *const PAGE_ALL_WORDS[] = {"終わりまで", "おわりまで", "最後まで", "さいごまで", "全部", "ぜんぶ", "全文"};
+static const char *const PAGE_CONTINUE_WORDS[] = {"続き", "つづき", "続けて", "つづけて", "次", "つぎ", "もっと"};
+/* Ignored when matching them: spaces and punctuation. */
+static const char *const PAGE_KEY_IGNORED[] = {
+    " ", "\t", "\n", "\r", "　", "。", "、", "．", "，", "！", "？", "!", "?", ".", ",",
+    "「", "」", "『", "』", "…", "ー", "〜", "~",
+};
+#define PAGE_KEY_MAX_CHARS 12
+#define COUNT_OF(a) (sizeof(a) / sizeof((a)[0]))
 
-static bool is_page_break(const char *c, const size_t n)
+static bool is_one_of(const char *c, const size_t n, const char *const *set, const size_t count)
 {
-    for (size_t i = 0; i < sizeof(PAGE_BREAKS) / sizeof(PAGE_BREAKS[0]); i++) {
-        if (strlen(PAGE_BREAKS[i]) == n && memcmp(c, PAGE_BREAKS[i], n) == 0) {
+    for (size_t i = 0; i < count; i++) {
+        if (strlen(set[i]) == n && memcmp(c, set[i], n) == 0) {
             return true;
         }
     }
     return false;
 }
+
+static bool contains_any(const char *s, const char *const *words, const size_t count)
+{
+    for (size_t i = 0; i < count; i++) {
+        if (strstr(s, words[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* prompt without the ignored characters; false if that leaves more than PAGE_KEY_MAX_CHARS. */
+static bool page_key_text(const char *prompt, char *key, const size_t cap)
+{
+    size_t used = 0;
+    size_t chars = 0;
+    for (size_t i = 0; prompt[i];) {
+        const size_t start = i++;
+        while (prompt[i] && is_continuation((unsigned char)prompt[i])) {
+            i++;
+        }
+        const size_t n = i - start;
+        if (is_one_of(prompt + start, n, PAGE_KEY_IGNORED, COUNT_OF(PAGE_KEY_IGNORED))) {
+            continue;
+        }
+        if (++chars > PAGE_KEY_MAX_CHARS || used + n >= cap) {
+            return false;
+        }
+        memcpy(key + used, prompt + start, n);
+        used += n;
+    }
+    key[used] = '\0';
+    return true;
+}
+
+hub_key_t hub_proto_page_key(const char *prompt)
+{
+    char key[PAGE_KEY_MAX_CHARS * 4 + 1];
+    if (!page_key_text(prompt, key, sizeof(key))) {
+        return HUB_KEY_NONE;
+    }
+    if (contains_any(key, PAGE_ALL_WORDS, COUNT_OF(PAGE_ALL_WORDS))) {
+        return HUB_KEY_ALL;
+    }
+    if (contains_any(key, PAGE_CONTINUE_WORDS, COUNT_OF(PAGE_CONTINUE_WORDS))) {
+        return HUB_KEY_CONTINUE;
+    }
+    return HUB_KEY_NONE;
+}
+
+/* A page is cut right after one of these. */
+static const char *const PAGE_BREAKS[] = {"。", "！", "？", "\n"};
 
 size_t hub_proto_page_cut(const char *text, const size_t room)
 {
@@ -216,7 +277,7 @@ size_t hub_proto_page_cut(const char *text, const size_t room)
             bytes++;
         }
         chars++;
-        if (chars > tail_from && is_page_break(text + start, bytes - start)) {
+        if (chars > tail_from && is_one_of(text + start, bytes - start, PAGE_BREAKS, COUNT_OF(PAGE_BREAKS))) {
             best = bytes;
         }
     }

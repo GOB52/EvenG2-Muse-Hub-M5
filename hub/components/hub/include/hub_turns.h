@@ -31,9 +31,11 @@ extern const char HUB_MSG_INTERNAL[];
 
 /*
  * A turn still running after cap_ms is treated as failed by the next ask(). A reply longer than
- * max_chars characters is paged: each ask() returns the next held page until the last one.
+ * max_chars characters is paged and the rest held: "続き" returns the next page, "終わりまで" the rest
+ * up to all_max_chars, and any other prompt drops it and starts a new turn.
  */
-void hub_turns_init(const hub_turns_ops_t *ops, int wait_ms, int64_t hold_ms, int64_t cap_ms, size_t max_chars);
+void hub_turns_init(const hub_turns_ops_t *ops, int wait_ms, int64_t hold_ms, int64_t cap_ms, size_t max_chars,
+                    size_t all_max_chars);
 /* The text to answer prompt with (at most max_chars characters). Blocks up to wait_ms. */
 void hub_turns_ask(const char *prompt, char *out, size_t out_len);
 /* A typed turn's console line (muse_hatch_listener_t). */
