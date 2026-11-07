@@ -1,0 +1,7 @@
+# Applied after the SDK's sdkconfig.defaults, devices/sdkconfig.muse and
+# devices/sdkconfig.muse-m5stack-sticks3 (see tools/build.sh).
+#
+# Paths in sdkconfig are relative to the project directory (hub/), so point the
+# SDK's project-relative files at the submodule.
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="third_party/muse-gadget-sdk/esp32/partitions_muse_8mb.csv"
+CONFIG_SECURE_BOOT_SIGNING_KEY="third_party/muse-gadget-sdk/esp32/dev_signing_key.pem"
