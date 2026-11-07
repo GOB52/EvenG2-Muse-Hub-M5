@@ -1,0 +1,146 @@
+diff --git a/esp32/components/muse/muse_chat.h b/esp32/components/muse/muse_chat.h
+index 0739166..433c8c0 100644
+--- a/esp32/components/muse/muse_chat.h
++++ b/esp32/components/muse/muse_chat.h
+@@ -162,6 +162,15 @@ void muse_hatch_set_listener(muse_hatch_listener_t listener);
+ /* Undoes the escapes in a line typed at the console (\n \r \t \\) in place; returns the length. */
+ size_t muse_hatch_unescape(char *s);
+ 
++/*
++ * Sends every turn (typed and spoken) to the side chat `id`, a lowercase UUID,
++ * and follows that chat's replies instead of the main chat's. A side chat Muse
++ * doesn't know yet is created by the first message. Call once, before Muse
++ * connects; a second call is ignored, and one made while connected takes effect
++ * on the next connection. Not calling it keeps the main chat.
++ */
++void muse_hatch_set_session_id(const char *id);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/esp32/components/muse/muse_chat_session.cpp b/esp32/components/muse/muse_chat_session.cpp
+index 9e53993..44a4007 100644
+--- a/esp32/components/muse/muse_chat_session.cpp
++++ b/esp32/components/muse/muse_chat_session.cpp
+@@ -292,6 +292,17 @@ static int16_t *s_pcm;       /* MINIMP3_MAX_SAMPLES_PER_FRAME */
+ static int16_t *s_pcm16;     /* resampled output */
+ static int64_t s_last_seq;
+ 
++#define SESSION_ID_MAX 40
++static char s_session_id[SESSION_ID_MAX];   /* the side chat, set once by muse_hatch_set_session_id() */
++static std::atomic<bool> s_session_set{false};
++static bool s_side_pending;                 /* the side chat isn't there yet: follow it after the next message */
++
++/* The side chat turns go to, or nullptr for the main chat. */
++static const char *side_chat(void)
++{
++    return s_session_set.load(std::memory_order_acquire) ? s_session_id : nullptr;
++}
++
+ static int64_t now_us(void)
+ {
+     return esp_timer_get_time();
+@@ -844,7 +855,16 @@ static bool resolve_vm(char *err, size_t err_cap)
+ static bool open_subscription(void)
+ {
+     s_last_seq = 0;
+-    s_conn.sub_id = open_stream(K_SUB, "POST", "/chat/subscribe", "application/json", "application/x-ndjson", "{}",
++    s_side_pending = false;
++    const char *side = side_chat();
++    char body[SESSION_ID_MAX + 20];
++    if (side) {
++        snprintf(body, sizeof(body), "{\"session_id\":\"%s\"}", side);
++    } else {
++        strlcpy(body, "{}", sizeof(body));
++    }
++    ESP_LOGI(TAG, "chat subscription: %s%s", side ? "side chat " : "main chat", side ? side : "");
++    s_conn.sub_id = open_stream(K_SUB, "POST", "/chat/subscribe", "application/json", "application/x-ndjson", body,
+                                 true);
+     return s_conn.sub_id != 0;
+ }
+@@ -1221,6 +1241,9 @@ static void send_chat(const char *text, const char *modality, bool spoken)
+     cJSON *body = cJSON_CreateObject();
+     cJSON_AddStringToObject(body, "message", text);
+     cJSON_AddStringToObject(body, "output_modality", modality);
++    if (const char *side = side_chat()) {
++        cJSON_AddStringToObject(body, "session_id", side);
++    }
+     if (spoken) {
+         cJSON_AddStringToObject(body, "device", MUSE_CHAT_SPOKEN_DEVICE);
+     }
+@@ -1612,7 +1635,21 @@ static void on_chat_ack(stream_t *s)
+     s_turn.acked = true;
+     mark(M_ACK);
+     ESP_LOGI(TAG, "chat/stream ack: user message %s", s_turn.user_ids[0]);
++    const char *side = side_chat();
++    const char *acked = cJSON_GetStringValue(cJSON_GetObjectItem(obj, "session_id"));
++    if (side && acked && strcmp(acked, side) != 0) {
++        ESP_LOGW(TAG, "Muse put the message in chat %s, not side chat %s", acked, side);
++    } else if (acked) {
++        ESP_LOGI(TAG, "chat/stream ack: chat %s", acked);
++    }
+     cJSON_Delete(root);
++    if (s_side_pending && side) {
++        /* The message just created the side chat. A reply already over by now is missed. */
++        if (!open_subscription()) {
++            s_side_pending = true;
++            ESP_LOGW(TAG, "side chat %s: subscribe failed; trying after the next message", side);
++        }
++    }
+     emit(MUSE_HATCH_EV_SENT, nullptr);
+ }
+ 
+@@ -1941,6 +1978,14 @@ static bool on_http_error(stream_t *s, const ApplicationResponseView &resp)
+     memcpy(body, resp.body.data(), n);
+     body[n] = '\0';
+     ESP_LOGW(TAG, "stream %lld: HTTP %d %s", (long long)s->id, (int)resp.status, body);
++    if (s->kind == K_SUB && resp.status == 404 && side_chat()) {
++        /* Muse doesn't know the side chat yet; the next message creates it. */
++        ESP_LOGW(TAG, "side chat %s not created yet: following it after the next message", side_chat());
++        close_stream(s);
++        s_conn.sub_id = 0;
++        s_side_pending = true;
++        return true;
++    }
+     return stream_end(s, false);
+ }
+ 
+@@ -2376,6 +2421,38 @@ extern "C" void muse_hatch_text_cancel(void)
+     post(CMD_TEXT_CANCEL, 0);
+ }
+ 
++/* Lowercase hex and dashes only: the ID goes into JSON bodies as it is. */
++static bool session_id_ok(const char *id)
++{
++    size_t n = id ? strlen(id) : 0;
++    if (n == 0 || n >= SESSION_ID_MAX) {
++        return false;
++    }
++    for (size_t i = 0; i < n; i++) {
++        char c = id[i];
++        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || c == '-')) {
++            return false;
++        }
++    }
++    return true;
++}
++
++extern "C" void muse_hatch_set_session_id(const char *id)
++{
++    if (s_session_set.load(std::memory_order_acquire)) {
++        ESP_LOGW(TAG, "side chat already set to %s; ignoring another", s_session_id);
++        return;
++    }
++    if (!session_id_ok(id)) {
++        ESP_LOGE(TAG, "side chat ID must be lowercase hex and dashes, under %d chars; using the main chat",
++                 SESSION_ID_MAX);
++        return;
++    }
++    strlcpy(s_session_id, id, sizeof(s_session_id));
++    s_session_set.store(true, std::memory_order_release);
++    ESP_LOGI(TAG, "side chat %s%s", s_session_id, s_connected ? " (from the next connection)" : "");
++}
++
+ extern "C" muse_hatch_ev_t muse_hatch_turn_event(char *text, size_t cap)
+ {
+     ev_t ev;
