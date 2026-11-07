@@ -1,0 +1,59 @@
+menu "Muse hub (Even AI endpoint)"
+
+    config HUB_HTTP_PORT
+        int "HTTP port"
+        default 8787
+
+    config HUB_RELAY_TOKEN
+        string "Bearer token, 32+ characters (set it in hub/sdkconfig.local)"
+        default ""
+        help
+            Even AI sends it as "Authorization: Bearer <token>". The HTTP
+            server does not start with a shorter one.
+
+    config HUB_MDNS_NAME
+        string "mDNS host name (<name>.local)"
+        default "muse-hub"
+
+    config HUB_WAIT_S
+        int "Seconds a request waits for Muse's reply"
+        default 25
+        help
+            Even AI gives up after about 30 s. A reply that takes longer is
+            held; saying 「続き」 (or 「終わりまで」) returns it, any other
+            prompt drops it and asks Muse anew.
+
+    config HUB_MAX_CHARS
+        int "Characters per page of a reply"
+        default 2000
+        range 100 5000
+        help
+            The G2 scrolls. A longer reply is split into pages; saying
+            "続き" returns the next one.
+
+    config HUB_ALL_MAX_CHARS
+        int "Characters returned at once for the rest of a reply"
+        default 5000
+        range 300 5000
+        help
+            Characters returned at once for 「終わりまで」/「全部」; the G2 scrolls.
+
+    config HUB_SIDE_CHAT
+        bool "Send the gadget's turns to a Muse side chat"
+        depends on MUSE_HATCH
+        default n
+        help
+            Every turn (from the G2 and spoken on the StickS3) goes to one
+            side chat of Muse instead of the main chat, and replies are read
+            from it. Off: the main chat, as before.
+
+    config HUB_SIDE_CHAT_ID
+        string "Side chat ID (a lowercase UUID; empty: make one and keep it in NVS)"
+        depends on HUB_SIDE_CHAT
+        default ""
+        help
+            A side chat Muse already has, or a new UUID (the first message
+            creates the chat). Empty: the hub makes one on first boot and
+            keeps it in NVS (a full flash erase makes a new one).
+
+endmenu

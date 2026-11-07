@@ -1,0 +1,21 @@
+diff --git a/esp32/main/main.c b/esp32/main/main.c
+index 7f0c67d..62521d3 100644
+--- a/esp32/main/main.c
++++ b/esp32/main/main.c
+@@ -47,6 +47,9 @@ static void sticky_power_hold(void) {
+ }
+ #endif
+ 
++/* Extension point for a project built around the SDK; runs once, before app_run(). */
++__attribute__((weak)) void hub_app_start(void) {}
++
+ void app_main(void) {
+ #if CONFIG_HOMEHUB_LED_BACKEND_STICKY_SSD1677 || CONFIG_MUSE_BOARD_RETERMINAL_STICKY
+     sticky_power_hold();
+@@ -81,5 +84,6 @@ void app_main(void) {
+ #if CONFIG_MUSE_ENABLED
+     muse_glue_start();
+ #endif
++    hub_app_start();
+     app_run();
+ }

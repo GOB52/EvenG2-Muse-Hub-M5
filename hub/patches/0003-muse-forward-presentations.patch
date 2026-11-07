@@ -1,0 +1,53 @@
+diff --git a/esp32/components/muse/muse_chat_session.cpp b/esp32/components/muse/muse_chat_session.cpp
+index 256b5b2..9e53993 100644
+--- a/esp32/components/muse/muse_chat_session.cpp
++++ b/esp32/components/muse/muse_chat_session.cpp
+@@ -1486,6 +1486,35 @@ static const char *msg_id(cJSON *payload, cJSON *event)
+     return id && id[0] ? id : nullptr;
+ }
+ 
++/* A widget (a list, a map, ...) to the console: its id, kind, texts and data, without the HTML. */
++static void forward_presentation(cJSON *payload)
++{
++    const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "id"));
++    if (!id || !id[0]) {
++        return;
++    }
++    cJSON *out = cJSON_CreateObject();
++    static const char *const KEYS[] = {"id", "kind", "display_text", "fallback_text"};
++    for (const char *key : KEYS) {
++        const char *v = cJSON_GetStringValue(cJSON_GetObjectItem(payload, key));
++        if (v) {
++            cJSON_AddStringToObject(out, key, v);
++        }
++    }
++    cJSON *data = cJSON_Duplicate(cJSON_GetObjectItem(payload, "data"), true);
++    if (data) {
++        cJSON_DeleteItemFromObject(data, "html");
++        cJSON_DeleteItemFromObject(cJSON_GetObjectItem(data, "typed_data"), "html");
++        cJSON_AddItemToObject(out, "data", data);
++    }
++    char *json = cJSON_PrintUnformatted(out);
++    cJSON_Delete(out);
++    if (json) {
++        muse_hatch_console("presentation", json, "\"id\":\"%.80s\"", id);
++        cJSON_free(json);
++    }
++}
++
+ static void on_event(cJSON *line)
+ {
+     if (strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(line, "type")) ?: "", "event") != 0) {
+@@ -1520,6 +1549,12 @@ static void on_event(cJSON *line)
+         s_turn.last_event_us = now_us();
+         return;
+     }
++    if (!strcmp(event, "delta.presentation")) {
++        if (s_turn.text) {
++            forward_presentation(payload);
++        }
++        return;
++    }
+     bool start = !strcmp(event, "delta.message_start");
+     bool append = !strcmp(event, "delta.text_append");
+     bool done = !strcmp(event, "delta.message_done");

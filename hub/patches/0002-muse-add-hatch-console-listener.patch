@@ -1,0 +1,50 @@
+diff --git a/esp32/components/muse/muse_chat.h b/esp32/components/muse/muse_chat.h
+index 48f0e25..0739166 100644
+--- a/esp32/components/muse/muse_chat.h
++++ b/esp32/components/muse/muse_chat.h
+@@ -152,6 +152,13 @@ void muse_hatch_text_cancel(void);
+  */
+ void muse_hatch_console(const char *type, const char *text, const char *fields, ...)
+     __attribute__((format(printf, 3, 4)));
++/*
++ * One listener for the "@chat" lines: called with the line's type, its fields
++ * (the JSON members, "" if none) and the whole text (NULL if none), on the task
++ * that prints it, before the line goes to the console. NULL removes it.
++ */
++typedef void (*muse_hatch_listener_t)(const char *type, const char *fields, const char *text);
++void muse_hatch_set_listener(muse_hatch_listener_t listener);
+ /* Undoes the escapes in a line typed at the console (\n \r \t \\) in place; returns the length. */
+ size_t muse_hatch_unescape(char *s);
+ 
+diff --git a/esp32/components/muse/muse_chat_text.c b/esp32/components/muse/muse_chat_text.c
+index dcfe8bb..52a8708 100644
+--- a/esp32/components/muse/muse_chat_text.c
++++ b/esp32/components/muse/muse_chat_text.c
+@@ -326,9 +326,27 @@ static size_t escape_some(const char **src, char *out, size_t cap)
+     return o;
+ }
+ 
++static muse_hatch_listener_t s_listener;
++
++void muse_hatch_set_listener(muse_hatch_listener_t listener)
++{
++    s_listener = listener;
++}
++
+ /* Each line goes out in one write, so other tasks' log lines land between lines, not inside them. */
+ void muse_hatch_console(const char *type, const char *text, const char *fields, ...)
+ {
++    muse_hatch_listener_t listener = s_listener;
++    if (listener) {
++        char member[128] = "";
++        if (fields) {
++            va_list lap;
++            va_start(lap, fields);
++            vsnprintf(member, sizeof(member), fields, lap);
++            va_end(lap);
++        }
++        listener(type, member, text);
++    }
+     static unsigned seq;
+     char line[CONSOLE_LINE];
+     do {

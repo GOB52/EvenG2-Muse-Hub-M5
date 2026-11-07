@@ -16,3 +16,9 @@ __pycache__/
 *.pyc
 eim_config.toml
 .DS_Store
+
+# relay/
+relay/.venv/
+relay/.env
+relay/captures/
+.pytest_cache/
