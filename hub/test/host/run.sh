@@ -12,6 +12,8 @@ cc -std=c11 -g -c "${san[@]}" -I "$cjson_dir" "$cjson_dir/cJSON.c" -o "$out_dir/
 cc -std=c11 -g -Wall -Wextra -Werror "${san[@]}" \
     -I "$hub_dir/components/hub/include" -I "$cjson_dir" \
     "$hub_dir/test/host/test_hub.c" \
+    "$hub_dir/test/host/test_turns.c" \
+    "$hub_dir/components/hub/hub_turns.c" \
     "$hub_dir/components/hub/hub_proto.c" \
     "$out_dir/cJSON.o" -lpthread -o "$out_dir/test_hub"
 "$out_dir/test_hub"

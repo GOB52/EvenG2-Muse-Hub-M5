@@ -121,6 +121,10 @@ static void test_completion_sse(void)
     free(s);
 }
 
+void run_turns_tests(void);
+extern int turns_run;
+extern int turns_failed;
+
 int main(void)
 {
     RUN(test_parse_takes_last_user_message);
@@ -131,6 +135,9 @@ int main(void)
     RUN(test_clip);
     RUN(test_completion_json);
     RUN(test_completion_sse);
+    run_turns_tests();
+    s_run += turns_run;
+    s_failed += turns_failed;
     printf("%d tests, %d failures\n", s_run, s_failed);
     return s_failed ? 1 : 0;
 }
