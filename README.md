@@ -72,6 +72,16 @@ G2 で「Hey Even」と話しかける。返事は Muse 本人から、テキス
 - **ウィジェット**: Muse の返事のリストは「見出し + ・項目 — 説明」、地図は「説明 + ・場所 — 日時など」の文字にして返す。
   画像の選択肢・HTML のウィジェット・タップで返信するボタンなど文字にできないものは「(Muse アプリに表示: …)」になる。
 - **空の返事**: Muse の返事がリンクや画像だけでテキストもウィジェットも無いときは、「(Muse の返事にテキストがありませんでした。…)」を返す。
+- **side chat** (`CONFIG_HUB_SIDE_CHAT=y` のとき): StickS3 の会話 (G2 からも StickS3 で話したものも) を Muse の
+  メインのチャットではなく side chat 1 つに送り、返事もそこから受け取る。Muse アプリで G2 の会話が分かれ、
+  メインのチャットで同時に打った質問の答えと取り違えない。既定はメインのチャット (今までどおり)。
+  - `hub/sdkconfig.local` に `CONFIG_HUB_SIDE_CHAT=y` を書く。決まった side chat に送るなら
+    `CONFIG_HUB_SIDE_CHAT_ID="<UUID>"` も書く (Muse に聞くと作成済みの side chat の ID を教えてくれる。小文字の UUID)。
+    書かなければ初回の起動で作って NVS に保存し、以後それを使う (フラッシュを全消去すると作り直す)。
+  - 書き換えたら `hub/build-sticks3/sdkconfig` を消してビルドし直す。起動ログの `side chat: <ID>` と
+    `chat subscription: side chat <ID>` で確かめられる。
+  - まだ無い side chat は最初の 1 通で作られる。その 1 通目の返事が受信を開き直す前に終わると取りこぼす
+    (G2 には「まだ考え中」が出る)。そのときはもう一度聞く。
 - StickS3 で音声の会話中 (正面のボタンを押して話している間) はテキストのターンを受け付けない。
 - StickS3 単体でも、正面のボタンを押して話せば Muse と会話できる (画面に日本語で表示。`CONFIG_MUSE_CJK_FONT`)。
 
@@ -85,6 +95,8 @@ G2 で「Hey Even」と話しかける。返事は Muse 本人から、テキス
 | `CONFIG_HUB_WAIT_S` | 25 | 返事を待つ秒数 |
 | `CONFIG_HUB_MAX_CHARS` | 2000 | 1 ページの文字数 |
 | `CONFIG_HUB_ALL_MAX_CHARS` | 5000 | 「終わりまで」で一度に返す文字数 |
+| `CONFIG_HUB_SIDE_CHAT` | n | `y` で StickS3 の会話を Muse の side chat に送る |
+| `CONFIG_HUB_SIDE_CHAT_ID` | (空) | side chat の UUID。空なら作って NVS に保存 |
 
 ## 開発者向け
 
@@ -93,8 +105,10 @@ G2 で「Hey Even」と話しかける。返事は Muse 本人から、テキス
   - `0002`: `muse_hatch_set_listener()` を足し、テキストターンの返事 (`@chat` の行) をファーム内で受け取れるようにする。
   - `0003`: テキストターン中の `delta.presentation` (Muse のウィジェット) を、HTML を除いた JSON にして `@chat` の `presentation` 行で流す。
     hub と relay はリスト・地図を箇条書きに、それ以外を「(Muse アプリに表示: …)」にして返事に入れ、本文の `[[hatch_widget:<id>]]` もそれに置き換える。
+  - `0004`: `muse_hatch_set_session_id()` を足す。設定すると `/chat/stream` と `/chat/subscribe` の本文に `session_id` を入れて
+    side chat を使う。未作成 (受信が 404) なら接続を切らず、最初のメッセージの ack の後に受信を開き直す。
 - **hub component** (`hub/components/hub/`): `hub_proto` (リクエスト解釈・応答生成・UTF-8・ページ分割・言葉の判定)、
-  `hub_turns` (ターン管理・保持・ページ送り)、`hub_http` (esp_http_server)、`hub_main` (起動・mDNS)。
+  `hub_turns` (ターン管理・保持・ページ送り)、`hub_http` (esp_http_server)、`hub_side_chat` (side chat の ID)、`hub_main` (起動・mDNS)。
 - **内部 RAM**: StickS3 は内部 RAM が少ない (定常で約 18K 空き)。hub のタスクのスタックとリクエストごとのバッファは PSRAM に置き
   (`hub_mem.h`)、HTTP サーバと mDNS は Muse への接続が 5 秒続いてから起動する (セットアップ中は SDK に譲る)。
 - **ホストテスト** (純粋処理とターン管理、Mac の cc + ASan/UBSan): `hub/test/host/run.sh` (一度 hub をビルドして cJSON を取得しておく)。
