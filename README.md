@@ -23,8 +23,8 @@ hub/tools/build.sh build
 hub/tools/build.sh flash-monitor /dev/cu.usbmodemXXXX
 ```
 
-`hub/sdkconfig.local` を後から足した・変えたときは `hub/build-sticks3/sdkconfig` を消してビルドし直す
-(sdkconfig の defaults は新しく作る sdkconfig にしか効かない)。
+`hub/sdkconfig.hub` / `hub/sdkconfig.local` を変えたとき (`sdkconfig.hub` の変更を pull したときも) は
+`hub/build-sticks3/sdkconfig` を消してビルドし直す (sdkconfig の defaults は新しく作る sdkconfig にしか効かない)。
 
 ペアリング: Muse アプリの Settings > Devices で Developer mode を有効にし、Add Device から
 `MuseGadget-XXXXXX` を追加する。
@@ -34,12 +34,12 @@ hub/tools/build.sh flash-monitor /dev/cu.usbmodemXXXX
 - 正面のボタンを押している間に話すと、Muse に voice note として届く。
 - Muse の返事は**テキストのみ** (Muse はガジェットに音声を返さない)。画面に日本語で表示される
   (`hub/sdkconfig.hub` で `CONFIG_MUSE_CJK_FONT` を有効にしている)。
-- USB 越しのテキスト会話 (SDK 付属ツール。pyserial が要る):
+- USB 越しのテキスト会話 (SDK 付属ツール。ESP-IDF を activate したシェルで実行する。pyserial は IDF の
+  Python 環境に入っている)。ポートを使う `monitor` / `flash-monitor` は先に閉じる:
 
   ```sh
-  cd hub/third_party/muse-gadget-sdk/esp32
-  python tools/muse/chat.py --port /dev/cu.usbmodemXXXX "質問"
-  python tools/muse/chat.py --port /dev/cu.usbmodemXXXX --status
+  python hub/third_party/muse-gadget-sdk/esp32/tools/muse/chat.py --port /dev/cu.usbmodemXXXX "質問"
+  python hub/third_party/muse-gadget-sdk/esp32/tools/muse/chat.py --port /dev/cu.usbmodemXXXX --status
   ```
 
 ## SDK

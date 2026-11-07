@@ -10,7 +10,8 @@
 # another idf.py front end (e.g. a wrapper that serializes configure).
 # hub/sdkconfig.local, if present, is applied last (put CONFIG_GADGET_SDK_TOKEN
 # there; it is git-ignored). sdkconfig defaults only seed a new sdkconfig, so
-# after adding or changing it, remove hub/build-sticks3/sdkconfig and rebuild.
+# after changing hub/sdkconfig.hub or hub/sdkconfig.local (including pulling a
+# change to sdkconfig.hub), remove hub/build-sticks3/sdkconfig and rebuild.
 set -euo pipefail
 
 cmd=${1:?build|flash|monitor|flash-monitor}
