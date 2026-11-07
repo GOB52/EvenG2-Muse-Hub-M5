@@ -1,0 +1,25 @@
+menu "Muse hub (Even AI endpoint)"
+
+    config HUB_HTTP_PORT
+        int "HTTP port"
+        default 8787
+
+    config HUB_RELAY_TOKEN
+        string "Bearer token, 32+ characters (set it in hub/sdkconfig.local)"
+        default ""
+        help
+            Even AI sends it as "Authorization: Bearer <token>". The HTTP
+            server does not start with a shorter one.
+
+    config HUB_MDNS_NAME
+        string "mDNS host name (<name>.local)"
+        default "muse-hub"
+
+    config HUB_WAIT_S
+        int "Seconds a request waits for Muse's reply"
+        default 25
+        help
+            Even AI gives up after about 30 s. A reply that takes longer is
+            held and returned to the next request.
+
+endmenu
