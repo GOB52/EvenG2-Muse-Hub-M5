@@ -1,4 +1,4 @@
-# M5StackMuseEvenG2
+# EvenG2-Muse-Hub-M5
 
 [日本語](README.md) | English
 
