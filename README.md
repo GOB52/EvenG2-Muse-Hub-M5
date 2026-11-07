@@ -1,5 +1,7 @@
 # M5StackMuseEvenG2
 
+日本語 | [English](README.en.md)
+
 Even G2 から、Muse Gadget にした M5Stack StickS3 を経由して Muse と会話する。
 G2 の Even AI (カスタムエージェント) の質問を、StickS3 のテキストターンで Muse に渡し、返事を G2 の HUD に返す。PC は要らない。
 
