@@ -74,7 +74,7 @@ class _Turn:
         self.done = threading.Event()
 
     def result(self) -> str:
-        """A reply without text (Muse sent only a link or a card) gets a note."""
+        """A reply without text or widgets (Muse sent only a link, say) gets a note."""
         if self.error is not None:
             return self.error
         return self.reply if self.reply.strip(BLANK_CHARS) else EMPTY_NOTE

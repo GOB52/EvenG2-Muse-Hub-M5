@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .turns import LinkError
+from .widgets import Widgets
 
 BUSY_MARK = "BUSY WITH A VOICE TURN"
 MSG_BUSY = "StickS3 で音声の会話中です。終わってからもう一度どうぞ。"
@@ -48,14 +49,17 @@ class BoardLink:
         with self._lock:
             try:
                 board = self._open()
-                reply = self._chat.Reply()
+                reply = self._chat.Reply()       # chat.py's Reply skips the "presentation" frames
+                widgets = Widgets()
 
                 def progress(frame: dict) -> None:
                     reply.feed(frame)
+                    widgets.feed(frame)
                     if frame.get("type") in ("text", "final"):
-                        on_text(reply.text)       # the whole partial text so far
+                        on_text(widgets.compose(reply.messages))   # the whole partial text so far
 
-                return board.chat(text, progress).text
+                board.chat(text, progress)
+                return widgets.compose(reply.messages)
             except (self._chat.BoardError, OSError) as e:
                 msg = str(e)
                 if BUSY_MARK in msg:
