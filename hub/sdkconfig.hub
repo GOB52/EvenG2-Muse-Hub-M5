@@ -5,3 +5,9 @@
 # SDK's project-relative files at the submodule.
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="third_party/muse-gadget-sdk/esp32/partitions_muse_8mb.csv"
 CONFIG_SECURE_BOOT_SIGNING_KEY="third_party/muse-gadget-sdk/esp32/dev_signing_key.pem"
+
+# Japanese captions: Unifont covers kana and every CJK Unified Ideograph
+# (Noto Sans SC covers only GB2312 hanzi). About 1.2 MB of flash; the 8 MB
+# table's 0x3E0000 app slots have room.
+CONFIG_MUSE_CJK_FONT=y
+CONFIG_MUSE_CJK_FONT_NOTO=n
