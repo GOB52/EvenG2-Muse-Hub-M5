@@ -1,7 +1,7 @@
 # M5StackMuseEvenG2
 
-Even G2 から、Muse Gadget にした M5Stack StickS3 を経由して Muse 本人と会話するための実験プロジェクト。
-G2 の Even AI (カスタムエージェント) の質問を、StickS3 のテキストターンで Muse に渡し、返事を G2 の HUD に返す。Mac は要らない。
+Even G2 から、Muse Gadget にした M5Stack StickS3 を経由して Muse と会話する。
+G2 の Even AI (カスタムエージェント) の質問を、StickS3 のテキストターンで Muse に渡し、返事を G2 の HUD に返す。PC は要らない。
 
 ```
 G2「Hey Even …」→ iPhone の Even アプリ (STT は Even のクラウド)
@@ -54,7 +54,7 @@ hub/tools/build.sh flash-monitor /dev/cu.usbmodemXXXX
 
 ## 使い方
 
-G2 で「Hey Even」と話しかける。返事は Muse 本人から、テキストで HUD に出る (Muse はガジェットに音声を返さない)。
+G2 で「Hey Even」と話しかける。返事は Muse から、テキストで HUD に出る (G2 にはテキストで返る。StickS3 で話したときは返事の音声も StickS3 で再生される)。
 
 - **25 秒の待ち**: Even AI は約 30 秒で諦めるので、25 秒で返事が揃わなければ届いた分と
   「(まだ考え中です。「続き」と話しかけると続きを返します)」を返す。返事は保持され、「続き」で返る (10 分で破棄)。
