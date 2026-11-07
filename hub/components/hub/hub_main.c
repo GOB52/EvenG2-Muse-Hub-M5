@@ -22,6 +22,7 @@
 #define NET_TASK_PRIO 4
 #define HOLD_MS (10 * 60 * 1000LL)
 #define TURN_CAP_MS (16 * 60 * 1000LL)
+#define HUB_START_DELAY_MS 5000    /* Muse online this long before the endpoint starts */
 
 /* The SDK's control link to Muse is up: the gadget is paired and online (main/noise_control.h). */
 extern bool noise_ctrl_is_connected(void);
@@ -83,28 +84,49 @@ static uint32_t sta_ip(esp_netif_ip_info_t *info)
     return info->ip.addr;
 }
 
+/* True once Muse has been online for HUB_START_DELAY_MS without a drop; *since is -1 while offline. */
+static bool online_long_enough(int64_t *since)
+{
+    if (!noise_ctrl_is_connected()) {
+        *since = -1;
+        return false;
+    }
+    if (*since < 0) {
+        *since = now_ms();
+    }
+    return now_ms() - *since >= HUB_START_DELAY_MS;
+}
+
+static void start_endpoint(const uint16_t port)
+{
+    const esp_err_t err = hub_http_start(port, CONFIG_HUB_RELAY_TOKEN);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "HTTP server not started (%s): set CONFIG_HUB_RELAY_TOKEN (32+ chars)",
+                 esp_err_to_name(err));
+        for (;;) {
+            vTaskDelay(portMAX_DELAY);   /* a task with a PSRAM stack can't delete itself */
+        }
+    }
+    start_mdns(port);
+}
+
 /*
- * Starts the endpoint once the gadget is paired and online: during setup the
- * SDK needs the internal RAM (its Wi-Fi scan task) that the server would hold.
+ * Starts the endpoint once the gadget is paired and has stayed online for a
+ * while: during setup, and right after Muse connects, the SDK needs the
+ * internal RAM (its Wi-Fi scan task, the session setup) that the server would hold.
  */
 static void net_task(void *arg)
 {
     const uint16_t port = CONFIG_HUB_HTTP_PORT;
     uint32_t last = 0;
+    int64_t online_since = -1;
     bool started = false;
     for (;;) {
         esp_netif_ip_info_t info;
         const uint32_t addr = sta_ip(&info);
-        if (!started && addr && noise_ctrl_is_connected()) {
-            const esp_err_t err = hub_http_start(port, CONFIG_HUB_RELAY_TOKEN);
-            if (err != ESP_OK) {
-                ESP_LOGE(TAG, "HTTP server not started (%s): set CONFIG_HUB_RELAY_TOKEN (32+ chars)",
-                         esp_err_to_name(err));
-                for (;;) {
-                    vTaskDelay(portMAX_DELAY);   /* a task with a PSRAM stack can't delete itself */
-                }
-            }
-            start_mdns(port);
+        const bool online = online_long_enough(&online_since);
+        if (!started && addr && online) {
+            start_endpoint(port);
             started = true;
         }
         if (started && addr && addr != last) {
