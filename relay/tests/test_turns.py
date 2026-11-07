@@ -69,7 +69,7 @@ def test_partial_is_the_latest_snapshot_not_a_concatenation():
 
 
 def test_long_partial_is_clipped_so_the_note_survives():
-    link = FakeLink(pieces=("あ" * 1000,), auto=False)
+    link = FakeLink(pieces=("あ" * (MAX_CHARS + 1000),), auto=False)
     turns = TurnManager(link, wait_s=1.0)
     out = turns.ask("q1")
     assert out.endswith(CONTINUE_NOTE) and len(out) <= MAX_CHARS

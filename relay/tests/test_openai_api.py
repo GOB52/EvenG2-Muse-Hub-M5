@@ -185,7 +185,7 @@ def test_models_lists_one_model(server):
 
 def test_reply_is_clipped(server):
     url, turns, _ = server
-    turns.reply = "あ" * 1000
+    turns.reply = "あ" * (MAX_CHARS + 1000)
     d = json.loads(_post(url, USER)[2])
     assert len(d["choices"][0]["message"]["content"]) == MAX_CHARS
 

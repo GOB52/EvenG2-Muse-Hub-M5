@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Optional
 
-MAX_CHARS = 400        # what fits on the Even AI card
+MAX_CHARS = 2000       # the G2 scrolls; this only bounds the reply
 
 
 class BadRequest(Exception):
