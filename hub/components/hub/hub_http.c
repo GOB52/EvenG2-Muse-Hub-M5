@@ -31,6 +31,14 @@ static esp_err_t send_error(httpd_req_t *req, const char *status, const char *me
     return httpd_resp_sendstr(req, body);
 }
 
+/* Rejects without reading the body: closing the socket keeps the single server task from draining it. */
+static esp_err_t reject_and_close(httpd_req_t *req, const char *status, const char *message)
+{
+    const esp_err_t err = send_error(req, status, message);
+    httpd_sess_trigger_close(req->handle, httpd_req_to_sockfd(req));
+    return err;
+}
+
 static bool authorized(httpd_req_t *req)
 {
     char header[AUTH_HEADER_MAX];
@@ -92,13 +100,13 @@ static esp_err_t send_reply(httpd_req_t *req, const hub_request_t *r, const char
 static esp_err_t completion_handler(httpd_req_t *req)
 {
     if (!authorized(req)) {
-        return send_error(req, "401 Unauthorized", "unauthorized");
+        return reject_and_close(req, "401 Unauthorized", "unauthorized");
     }
     if (req->content_len == 0) {
         return send_error(req, "400 Bad Request", "empty body");
     }
     if (req->content_len > HUB_MAX_BODY) {
-        return send_error(req, "413 Payload Too Large", "body too large");
+        return reject_and_close(req, "413 Payload Too Large", "body too large");
     }
     char *body = read_body(req);
     if (!body) {
