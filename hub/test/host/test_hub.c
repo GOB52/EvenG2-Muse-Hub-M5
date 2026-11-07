@@ -99,6 +99,16 @@ static void test_clip(void)
     CHECK(strlen(out) < sizeof(out));
 }
 
+static void test_page_cut(void)
+{
+    CHECK(hub_proto_page_cut("あいう", 5) == 9);                     /* fits: the whole text */
+    CHECK(hub_proto_page_cut("abcdefghij", 5) == 5);                /* no break: at the room */
+    CHECK(hub_proto_page_cut("abcd！efgh", 5) == 7);                /* right after "！" */
+    CHECK(hub_proto_page_cut("abcdefgh？ij", 10) == 11);            /* "？" ends char 9 of 10 */
+    CHECK(hub_proto_page_cut("a。bcdefghij", 10) == 12);            /* "。" before the last 20% */
+    CHECK(hub_proto_page_cut("abcdefgh\nij", 10) == 9);
+}
+
 static void test_completion_json(void)
 {
     char *s = hub_proto_completion_json("返事", "openclaw", 123, "chatcmpl-x");
@@ -139,6 +149,7 @@ int main(void)
     RUN(test_check_auth);
     RUN(test_utf8_helpers);
     RUN(test_clip);
+    RUN(test_page_cut);
     RUN(test_completion_json);
     RUN(test_completion_sse);
     run_turns_tests();

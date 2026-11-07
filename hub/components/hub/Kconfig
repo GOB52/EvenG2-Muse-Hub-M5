@@ -23,10 +23,11 @@ menu "Muse hub (Even AI endpoint)"
             held and returned to the next request.
 
     config HUB_MAX_CHARS
-        int "Characters a reply is clipped to"
+        int "Characters per page of a reply"
         default 2000
         range 100 5000
         help
-            The G2 scrolls; this only bounds the reply.
+            The G2 scrolls. A longer reply is split into pages; saying
+            "続き" returns the next one.
 
 endmenu

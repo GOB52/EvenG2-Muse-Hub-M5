@@ -37,6 +37,12 @@ void hub_proto_utf8_trim(char *s);
 /* Copies at most max_chars characters of in to out, ending with "…" when cut. */
 void hub_proto_clip(const char *in, char *out, size_t out_len, size_t max_chars);
 
+/*
+ * Bytes of text's first page of at most room characters: the whole text if it fits, else cut right
+ * after the last "。", "！", "？" or "\n" in the last 20% of the room, else at room characters.
+ */
+size_t hub_proto_page_cut(const char *text, size_t room);
+
 /* chat.completion JSON / SSE stream for text. cJSON_malloc'd; free with hub_proto_free(). NULL on no memory. */
 char *hub_proto_completion_json(const char *text, const char *model, long created, const char *id);
 char *hub_proto_completion_sse(const char *text, const char *model, long created, const char *id);

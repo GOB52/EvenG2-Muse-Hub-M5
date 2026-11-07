@@ -23,11 +23,16 @@ typedef struct {
 
 extern const char HUB_STILL_WORKING[];
 extern const char HUB_CONTINUE_NOTE[];
+extern const char HUB_PAGE_NOTE[];
+extern const char HUB_EMPTY_NOTE[];
 extern const char HUB_MSG_BUSY[];
 extern const char HUB_MSG_NOT_SET_UP[];
 extern const char HUB_MSG_INTERNAL[];
 
-/* A turn still running after cap_ms is treated as failed by the next ask(). Replies get at most max_chars characters. */
+/*
+ * A turn still running after cap_ms is treated as failed by the next ask(). A reply longer than
+ * max_chars characters is paged: each ask() returns the next held page until the last one.
+ */
 void hub_turns_init(const hub_turns_ops_t *ops, int wait_ms, int64_t hold_ms, int64_t cap_ms, size_t max_chars);
 /* The text to answer prompt with (at most max_chars characters). Blocks up to wait_ms. */
 void hub_turns_ask(const char *prompt, char *out, size_t out_len);

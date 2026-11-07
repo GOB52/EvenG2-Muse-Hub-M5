@@ -192,6 +192,37 @@ void hub_proto_clip(const char *in, char *out, const size_t out_len, const size_
     }
 }
 
+static const char *const PAGE_BREAKS[] = {"\xE3\x80\x82", "\xEF\xBC\x81", "\xEF\xBC\x9F", "\n"};  /* 。！？ */
+
+static bool is_page_break(const char *c, const size_t n)
+{
+    for (size_t i = 0; i < sizeof(PAGE_BREAKS) / sizeof(PAGE_BREAKS[0]); i++) {
+        if (strlen(PAGE_BREAKS[i]) == n && memcmp(c, PAGE_BREAKS[i], n) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+size_t hub_proto_page_cut(const char *text, const size_t room)
+{
+    const size_t tail_from = room - room / 5;    /* characters before the last 20% */
+    size_t bytes = 0;
+    size_t chars = 0;
+    size_t best = 0;
+    while (text[bytes] && chars < room) {
+        const size_t start = bytes++;
+        while (text[bytes] && is_continuation((unsigned char)text[bytes])) {
+            bytes++;
+        }
+        chars++;
+        if (chars > tail_from && is_page_break(text + start, bytes - start)) {
+            best = bytes;
+        }
+    }
+    return text[bytes] && best ? best : bytes;
+}
+
 static cJSON *chunk_base(const char *object, const char *model, const long created, const char *id)
 {
     cJSON *root = cJSON_CreateObject();

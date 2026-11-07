@@ -21,6 +21,8 @@
 
 const char HUB_STILL_WORKING[] = "まだ考え中です。少ししてからもう一度話しかけてください。";
 const char HUB_CONTINUE_NOTE[] = "(まだ考え中です。もう一度話しかけると続きを返します)";
+const char HUB_PAGE_NOTE[] = "(続きは「続き」と話しかけてください)";
+const char HUB_EMPTY_NOTE[] = "(Muse の返事にテキストがありませんでした。リンクや画像はガジェットに届きません)";
 const char HUB_MSG_BUSY[] = "StickS3 で音声の会話中です。終わってからもう一度どうぞ。";
 const char HUB_MSG_NOT_SET_UP[] = "Muse が未設定です。ペアリングを確認してください。";
 const char HUB_MSG_INTERNAL[] = "Muse に届きませんでした (内部エラー)。";
@@ -151,12 +153,26 @@ static void build(char *out, const size_t cap)
     }
 }
 
+static bool is_blank(const char *s)
+{
+    for (; *s; s++) {
+        if (*s != ' ' && *s != '\t' && *s != '\n' && *s != '\r') {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* The finished turn's reply. A reply without text (Muse sent only a link or a card) gets a note. */
 static void result(char *out, const size_t cap)
 {
     if (s_error[0]) {
         snprintf(out, cap, "%s", s_error);
-    } else {
-        build(out, cap);
+        return;
+    }
+    build(out, cap);
+    if (is_blank(out)) {
+        snprintf(out, cap, "%s", HUB_EMPTY_NOTE);
     }
 }
 
@@ -249,6 +265,37 @@ static void with_note(const char *partial, char *out, const size_t out_len)
     hub_mem_free(clipped);
 }
 
+/*
+ * Leaves the first page of a finished reply in out, followed by "\nPAGE_NOTE" when more is left,
+ * and holds the rest for the next ask(). Call with the lock held.
+ */
+static void page(char *out, const size_t out_len)
+{
+    if (hub_proto_utf8_chars(out) <= s_max_chars) {
+        return;
+    }
+    const size_t note = hub_proto_utf8_chars(HUB_PAGE_NOTE) + 1;
+    const size_t room = s_max_chars > note ? s_max_chars - note : 1;
+    size_t cut = hub_proto_page_cut(out, room);
+    const char *rest = out + cut;
+    while (*rest == '\n') {
+        rest++;
+    }
+    snprintf(s_held, sizeof(s_held), "%s", rest);
+    hub_proto_utf8_trim(s_held);
+    s_has_held = s_held[0] != '\0';
+    s_held_at = s_ops->now_ms();
+    while (cut > 0 && out[cut - 1] == '\n') {
+        cut--;
+    }
+    out[cut] = '\0';
+    if (s_has_held) {
+        append(out, out_len, "\n");
+        append(out, out_len, HUB_PAGE_NOTE);
+    }
+}
+
+/* A safety clip: a page never exceeds max_chars. */
 static void finish(char *out, const size_t out_len)
 {
     const size_t n = strlen(out) + 1;
@@ -267,6 +314,7 @@ void hub_turns_ask(const char *prompt, char *out, const size_t out_len)
         s_has_held = false;
         if (s_ops->now_ms() - s_held_at <= s_hold_ms) {
             snprintf(out, out_len, "%s", s_held);
+            page(out, out_len);
             s_ops->unlock();
             finish(out, out_len);
             return;
@@ -300,6 +348,7 @@ void hub_turns_ask(const char *prompt, char *out, const size_t out_len)
     s_ops->lock();
     if (s_finished) {
         result(out, out_len);
+        page(out, out_len);
         s_ops->unlock();
         finish(out, out_len);
         return;
