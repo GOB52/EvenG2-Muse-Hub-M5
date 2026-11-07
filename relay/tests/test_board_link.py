@@ -2,11 +2,11 @@ import types
 
 import pytest
 
-from muse_relay.board_link import MSG_BUSY, BoardLink, sdk_tools_dir
+from muse_relay.board_link import MSG_BUSY, MSG_INTERNAL, BoardLink, sdk_tools_dir
 from muse_relay.turns import LinkError
 
 
-def make_chat(frames=(), reply_text="返事", error=None):
+def make_chat(frames=(), reply_text="返事", error=None, exc=None):
     """A stand-in for the SDK's chat module."""
     mod = types.SimpleNamespace()
 
@@ -26,6 +26,8 @@ def make_chat(frames=(), reply_text="返事", error=None):
         def chat(self, text, progress=None):
             for f in frames:
                 progress(f)
+            if exc:
+                raise exc
             if error:
                 raise BoardError(error)
             return types.SimpleNamespace(text=reply_text)
@@ -89,3 +91,24 @@ def test_long_error_is_shortened_to_first_line():
         link.run_turn("q", lambda _: None)
     msg = str(e.value)
     assert "Board log" not in msg and len(msg) < 100
+
+
+def test_unexpected_exception_maps_to_link_error_and_closes():
+    chat = make_chat(exc=ValueError("surrogates not allowed"))
+    link = BoardLink("/dev/x", chat_module=chat)
+    with pytest.raises(LinkError) as e:
+        link.run_turn("q", lambda _: None)
+    assert str(e.value) == MSG_INTERNAL
+    with pytest.raises(LinkError):
+        link.run_turn("q", lambda _: None)
+    assert chat.Board.opened == ["/dev/x", "/dev/x"]
+
+
+def test_muse_side_error_keeps_the_port_open():
+    chat = make_chat(error="Muse: network error")
+    link = BoardLink("/dev/x", chat_module=chat)
+    for _ in range(2):
+        with pytest.raises(LinkError) as e:
+            link.run_turn("q", lambda _: None)
+        assert str(e.value) == "Muse に届きませんでした (Muse: network error)。"
+    assert chat.Board.opened == ["/dev/x"]

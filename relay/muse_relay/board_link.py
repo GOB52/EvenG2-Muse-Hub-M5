@@ -10,6 +10,8 @@ from .turns import LinkError
 BUSY_MARK = "BUSY WITH A VOICE TURN"
 MSG_BUSY = "StickS3 で音声の会話中です。終わってからもう一度どうぞ。"
 REASON_MAX = 60
+MUSE_ERROR_MARK = "Muse: "      # the board answered with an error: the cable is fine, keep the port
+MSG_INTERNAL = "Muse に届きませんでした (内部エラー)。"
 
 
 def sdk_tools_dir() -> Path:
@@ -56,8 +58,12 @@ class BoardLink:
                 msg = str(e)
                 if BUSY_MARK in msg:
                     raise LinkError(MSG_BUSY) from e
-                self._close()
+                if not msg.startswith(MUSE_ERROR_MARK):
+                    self._close()
                 raise LinkError(f"Muse に届きませんでした ({_reason(msg)})。") from e
+            except Exception as e:
+                self._close()
+                raise LinkError(MSG_INTERNAL) from e
 
     def _open(self):
         if self._board is None:

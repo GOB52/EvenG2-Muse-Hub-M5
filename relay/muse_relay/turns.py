@@ -12,6 +12,7 @@ WAIT_S = 25.0
 HOLD_S = 10 * 60.0
 STILL_WORKING = "まだ考え中です。少ししてからもう一度話しかけてください。"
 CONTINUE_NOTE = "(まだ考え中です。もう一度話しかけると続きを返します)"
+MSG_INTERNAL = "Muse に届きませんでした (内部エラー)。"
 
 
 class LinkError(Exception):
@@ -72,12 +73,15 @@ class TurnManager:
             turn.reply = self._link.run_turn(text, turn.pieces.append)
         except LinkError as e:
             turn.error = str(e)
-        with self._lock:
-            self._running = None
-            turn.finished = True
-            if turn.detached:
-                self._held = (turn.result(), self._clock())
-        turn.done.set()
+        except Exception:
+            turn.error = MSG_INTERNAL
+        finally:
+            with self._lock:
+                self._running = None
+                turn.finished = True
+                if turn.detached:
+                    self._held = (turn.result(), self._clock())
+            turn.done.set()
 
     def _take_held(self) -> Optional[str]:
         """Call with the lock held."""

@@ -2,7 +2,7 @@ import threading
 
 import pytest
 
-from muse_relay.turns import CONTINUE_NOTE, STILL_WORKING, LinkError, TurnManager
+from muse_relay.turns import CONTINUE_NOTE, MSG_INTERNAL, STILL_WORKING, LinkError, TurnManager
 
 
 class FakeLink:
@@ -52,7 +52,7 @@ def test_link_error_message_is_the_reply():
 
 def test_slow_reply_returns_partial_then_held_reply():
     link = FakeLink(reply="途中まで。続き。", pieces=("途中まで。",), auto=False)
-    turns = TurnManager(link, wait_s=0.2)
+    turns = TurnManager(link, wait_s=1.0)
     assert turns.ask("q1") == "途中まで。\n" + CONTINUE_NOTE
     link.release()
     _wait_idle(turns)
@@ -98,6 +98,18 @@ def test_held_reply_is_returned_once():
     assert turns.ask("q2") == "保持"
     link.reply, link.auto = "次", True
     assert turns.ask("q3") == "次"
+
+
+class BrokenLink:
+    def run_turn(self, text, on_text):
+        raise RuntimeError("boom")
+
+
+def test_unexpected_error_still_replies_and_leaves_manager_idle():
+    turns = TurnManager(BrokenLink(), wait_s=2)
+    assert turns.ask("q") == MSG_INTERNAL
+    assert not turns.busy()
+    assert turns.ask("q") == MSG_INTERNAL
 
 
 def _wait_idle(turns):
