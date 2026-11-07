@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -12,6 +13,7 @@ extern "C" {
 #define HUB_PROMPT_MAX 4096
 #define HUB_MODEL_MAX 64
 #define HUB_MIN_TOKEN_LEN 32
+#define HUB_UUID_LEN 36
 
 typedef struct {
     char prompt[HUB_PROMPT_MAX];
@@ -87,6 +89,11 @@ void hub_proto_replace_widget_markers(const char *text, hub_widget_lookup_t look
                                       size_t cap);
 
 extern const char HUB_UNKNOWN_WIDGET[];
+
+/* True for a lowercase UUID: 8-4-4-4-12 hex digits (a Muse side chat ID). */
+bool hub_proto_uuid_valid(const char *s);
+/* A version 4 UUID made from 16 random bytes, into out (HUB_UUID_LEN + 1 bytes). */
+void hub_proto_uuid_format(const uint8_t rnd[16], char *out);
 
 /* chat.completion JSON / SSE stream for text. cJSON_malloc'd; free with hub_proto_free(). NULL on no memory. */
 char *hub_proto_completion_json(const char *text, const char *model, long created, const char *id);

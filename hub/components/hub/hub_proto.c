@@ -599,6 +599,44 @@ char *hub_proto_completion_sse(const char *text, const char *model, const long c
     return out;
 }
 
+static bool uuid_dash_at(const size_t i)
+{
+    return i == 8 || i == 13 || i == 18 || i == 23;
+}
+
+bool hub_proto_uuid_valid(const char *s)
+{
+    if (!s) {
+        return false;
+    }
+    for (size_t i = 0; i < HUB_UUID_LEN; i++) {
+        const char c = s[i];   /* a shorter string stops here at its '\0' */
+        const bool hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+        if (uuid_dash_at(i) ? c != '-' : !hex) {
+            return false;
+        }
+    }
+    return s[HUB_UUID_LEN] == '\0';
+}
+
+void hub_proto_uuid_format(const uint8_t rnd[16], char *out)
+{
+    static const char HEX[] = "0123456789abcdef";
+    uint8_t b[16];
+    memcpy(b, rnd, sizeof(b));
+    b[6] = (uint8_t)((b[6] & 0x0f) | 0x40);   /* version 4 */
+    b[8] = (uint8_t)((b[8] & 0x3f) | 0x80);   /* variant 10xx */
+    size_t o = 0;
+    for (size_t i = 0; i < sizeof(b); i++) {
+        if (i == 4 || i == 6 || i == 8 || i == 10) {
+            out[o++] = '-';
+        }
+        out[o++] = HEX[b[i] >> 4];
+        out[o++] = HEX[b[i] & 0x0f];
+    }
+    out[o] = '\0';
+}
+
 void hub_proto_free(void *p)
 {
     cJSON_free(p);

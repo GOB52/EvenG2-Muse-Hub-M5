@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -281,6 +282,37 @@ static void test_replace_widget_markers(void)
     CHECK(strlen(small) < sizeof(small));
 }
 
+static void test_uuid_valid(void)
+{
+    CHECK(hub_proto_uuid_valid("27dcfb07-ef1e-499d-b78b-806b7f5211ec"));
+    CHECK(hub_proto_uuid_valid("00000000-0000-0000-0000-000000000000"));
+    CHECK(!hub_proto_uuid_valid(NULL));
+    CHECK(!hub_proto_uuid_valid(""));
+    CHECK(!hub_proto_uuid_valid("27DCFB07-EF1E-499D-B78B-806B7F5211EC"));    /* uppercase */
+    CHECK(!hub_proto_uuid_valid("27dcfb07-ef1e-499d-b78b-806b7f5211e"));     /* 35 chars */
+    CHECK(!hub_proto_uuid_valid("27dcfb07-ef1e-499d-b78b-806b7f5211ecc"));   /* 37 chars */
+    CHECK(!hub_proto_uuid_valid("27dcfb0-7ef1e-499d-b78b-806b7f5211ec"));    /* dash moved */
+    CHECK(!hub_proto_uuid_valid("27dcfb07-ef1e-499d-b78b-806b7f5211eg"));    /* not hex */
+    CHECK(!hub_proto_uuid_valid("27dcfb07\"ef1e-499d-b78b-806b7f5211ec"));   /* a quote */
+}
+
+static void test_uuid_format(void)
+{
+    uint8_t rnd[16];
+    char out[HUB_UUID_LEN + 1];
+    for (int i = 0; i < 16; i++) {
+        rnd[i] = (uint8_t)i;
+    }
+    hub_proto_uuid_format(rnd, out);
+    CHECK(strcmp(out, "00010203-0405-4607-8809-0a0b0c0d0e0f") == 0);
+    CHECK(hub_proto_uuid_valid(out));
+    memset(rnd, 0xff, sizeof(rnd));
+    hub_proto_uuid_format(rnd, out);
+    CHECK(strcmp(out, "ffffffff-ffff-4fff-bfff-ffffffffffff") == 0);
+    CHECK(hub_proto_uuid_valid(out));
+    CHECK(rnd[6] == 0xff && rnd[8] == 0xff);   /* the input is left alone */
+}
+
 void run_turns_tests(void);
 extern int turns_run;
 extern int turns_failed;
@@ -302,6 +334,8 @@ int main(void)
     RUN(test_render_other_kinds_as_a_note);
     RUN(test_render_stays_in_the_buffer);
     RUN(test_replace_widget_markers);
+    RUN(test_uuid_valid);
+    RUN(test_uuid_format);
     run_turns_tests();
     s_run += turns_run;
     s_failed += turns_failed;
