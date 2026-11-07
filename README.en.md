@@ -29,7 +29,7 @@ and "Localizing the keywords and notes".
 ## Building and flashing the StickS3 (hub)
 
 ```sh
-git clone --recursive <this repo>        # existing clone: git submodule update --init
+git clone --recursive https://github.com/GOB52/EvenG2-Muse-Hub-M5.git  # existing clone: git submodule update --init
 . <esp-idf v6.0.3>/export.sh             # with eim: activate_idf_v6.0.3.sh
 
 # write the tokens (git-ignored; see "Tokens" below)
@@ -212,6 +212,10 @@ Even's Endpoint is `http://<Mac's LAN IP>:8787/v1/chat/completions` on the LAN, 
 `hub/CMakeLists.txt` includes the SDK's `esp32/cmake/project.cmake` and uses the SDK's `main` and `components` as they are.
 sdkconfig layers the SDK's `sdkconfig.defaults` → `devices/sdkconfig.muse` →
 `devices/sdkconfig.muse-m5stack-sticks3` → `hub/sdkconfig.hub` → `hub/sdkconfig.local`.
+
+The firmware version is `999.0.0+hub.<hub version>` (e.g. `999.0.0+hub.0.0.1`, `PROJECT_VER` in `hub/CMakeLists.txt`).
+OTA is on for Muse boards and installs only an image whose `MAJOR.MINOR.PATCH` is newer, so the SDK's `999.0.0` stays in front
+to keep an official Muse image from replacing the hub. The part after `+hub.` is the hub's version (this repo's tag).
 
 Licenses:
 
