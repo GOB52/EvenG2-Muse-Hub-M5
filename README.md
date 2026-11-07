@@ -106,7 +106,8 @@ G2 で「Hey Even」と話しかける。返事は Muse 本人から、テキス
   - `0003`: テキストターン中の `delta.presentation` (Muse のウィジェット) を、HTML を除いた JSON にして `@chat` の `presentation` 行で流す。
     hub と relay はリスト・地図を箇条書きに、それ以外を「(Muse アプリに表示: …)」にして返事に入れ、本文の `[[hatch_widget:<id>]]` もそれに置き換える。
   - `0004`: `muse_hatch_set_session_id()` を足す。設定すると `/chat/stream` と `/chat/subscribe` の本文に `session_id` を入れて
-    side chat を使う。未作成 (受信が 404) なら接続を切らず、最初のメッセージの ack の後に受信を開き直す。
+    side chat を使う (音声ノートの本文にも)。未作成 (受信が 404) なら接続を切らず、最初のメッセージの ack の後に受信を開き直す。
+    接続中の設定は受け付けない。
 - **hub component** (`hub/components/hub/`): `hub_proto` (リクエスト解釈・応答生成・UTF-8・ページ分割・言葉の判定)、
   `hub_turns` (ターン管理・保持・ページ送り)、`hub_http` (esp_http_server)、`hub_side_chat` (side chat の ID)、`hub_main` (起動・mDNS)。
 - **内部 RAM**: StickS3 は内部 RAM が少ない (定常で約 18K 空き)。hub のタスクのスタックとリクエストごとのバッファは PSRAM に置き
