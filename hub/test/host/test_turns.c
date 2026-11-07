@@ -15,6 +15,8 @@
         }                                                                    \
     } while (0)
 
+#define TURN_CAP 960000
+
 int turns_failed;
 int turns_run;
 
@@ -85,6 +87,7 @@ static bool start_turn(const char *prompt)
         hub_turns_on_event("text", "\"msg\":0", "送るよ。");
         hub_turns_on_event("done", "\"messages\":1,\"complete\":true", NULL);
     } else if (strcmp(s_script, "multi") == 0) {
+        hub_turns_on_event("sent", "\"bytes\":1", NULL);
         hub_turns_on_event("text", "\"msg\":0", "途中");
         hub_turns_on_event("final", "\"msg\":0", "一つ目");
         hub_turns_on_event("text", "\"msg\":1", "二つ目");
@@ -92,8 +95,21 @@ static bool start_turn(const char *prompt)
     } else if (strcmp(s_script, "busy") == 0) {
         hub_turns_on_event("error", "", "BUSY WITH A VOICE TURN");
     } else if (strcmp(s_script, "slow") == 0) {
+        hub_turns_on_event("sent", "\"bytes\":2", NULL);
         hub_turns_on_event("text", "\"msg\":0", "途中まで。");
+    } else if (strcmp(s_script, "foreign") == 0) {
+        hub_turns_on_event("error", "", "INTERRUPTED");
+        hub_turns_on_event("busy", "\"on\":true", NULL);
+        hub_turns_on_event("text", "\"msg\":0", "他人の");
+        hub_turns_on_event("final", "\"msg\":0", "他人の最終");
+        hub_turns_on_event("done", "\"messages\":1,\"complete\":true", NULL);
+        hub_turns_on_event("sent", "\"bytes\":1", NULL);
+        hub_turns_on_event("text", "\"msg\":0", "自分の返事");
+        hub_turns_on_event("done", "\"messages\":1,\"complete\":true", NULL);
+    } else if (strcmp(s_script, "unreachable") == 0) {
+        hub_turns_on_event("error", "", "CAN'T REACH MUSE");
     } else if (strcmp(s_script, "longslow") == 0) {
+        hub_turns_on_event("sent", "\"bytes\":3", NULL);
         repeat(piece, sizeof(piece), "a", 500);
         hub_turns_on_event("text", "\"msg\":0", piece);
     }
@@ -110,7 +126,7 @@ static void setup(const char *script)
     s_script = script;
     s_prompt_count = 0;
     s_now = 1000;
-    hub_turns_init(&OPS, 100, 600000);
+    hub_turns_init(&OPS, 100, 600000, TURN_CAP);
     turns_run++;
 }
 
@@ -223,12 +239,55 @@ static void test_long_held_reply_is_clipped(void)
     char piece[1000];
     setup("none");
     hub_turns_ask("q", out, sizeof(out));
+    hub_turns_on_event("sent", "\"bytes\":1", NULL);
     repeat(piece, sizeof(piece), "あ", 300);
     hub_turns_on_event("text", "\"msg\":0", piece);
     hub_turns_on_event("text", "\"msg\":1", piece);
     hub_turns_on_event("done", "", NULL);
     hub_turns_ask("q2", out, sizeof(out));
     CHECK(hub_proto_utf8_chars(out) == HUB_MAX_CHARS);
+}
+
+static void test_foreign_lines_before_sent_are_ignored(void)
+{
+    char out[HUB_REPLY_MAX];
+    setup("foreign");
+    hub_turns_ask("q", out, sizeof(out));
+    CHECK(strcmp(out, "自分の返事") == 0);
+    CHECK(!hub_turns_busy());
+}
+
+static void test_busy_before_sent_is_still_mapped(void)
+{
+    char out[HUB_REPLY_MAX];
+    setup("busy");
+    hub_turns_ask("q", out, sizeof(out));
+    CHECK(strcmp(out, HUB_MSG_BUSY) == 0);
+}
+
+static void test_cant_reach_before_sent_ends_the_turn(void)
+{
+    char out[HUB_REPLY_MAX];
+    setup("unreachable");
+    hub_turns_ask("q", out, sizeof(out));
+    CHECK(strcmp(out, "Muse に届きませんでした (CAN'T REACH MUSE)。") == 0);
+    CHECK(!hub_turns_busy());
+}
+
+static void test_stuck_turn_is_dropped_after_the_cap(void)
+{
+    char out[HUB_REPLY_MAX];
+    setup("slow");
+    hub_turns_ask("q1", out, sizeof(out));
+    CHECK(hub_turns_busy());
+    s_now += TURN_CAP - 1;
+    hub_turns_ask("q2", out, sizeof(out));
+    CHECK(strcmp(out, HUB_STILL_WORKING) == 0);
+    s_now += 2;
+    s_script = "fast";
+    hub_turns_ask("q3", out, sizeof(out));
+    CHECK(strcmp(out, "はい、送るよ。") == 0);
+    CHECK(s_prompt_count == 2);
 }
 
 void run_turns_tests(void)
@@ -243,4 +302,8 @@ void run_turns_tests(void)
     test_no_partial_is_the_note_only();
     test_long_partial_keeps_the_note();
     test_long_held_reply_is_clipped();
+    test_foreign_lines_before_sent_are_ignored();
+    test_busy_before_sent_is_still_mapped();
+    test_cant_reach_before_sent_ends_the_turn();
+    test_stuck_turn_is_dropped_after_the_cap();
 }

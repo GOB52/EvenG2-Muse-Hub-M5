@@ -20,6 +20,7 @@
 #define NET_TASK_STACK 4096
 #define NET_TASK_PRIO 4
 #define HOLD_MS (10 * 60 * 1000LL)
+#define TURN_CAP_MS (16 * 60 * 1000LL)
 
 static const char *TAG = "hub";
 static SemaphoreHandle_t s_mutex;
@@ -103,7 +104,7 @@ void hub_app_start(void)
         ESP_LOGE(TAG, "no memory for the hub");
         return;
     }
-    hub_turns_init(&OPS, CONFIG_HUB_WAIT_S * 1000, HOLD_MS);
+    hub_turns_init(&OPS, CONFIG_HUB_WAIT_S * 1000, HOLD_MS, TURN_CAP_MS);
     muse_hatch_set_listener(hub_turns_on_event);
     xTaskCreate(net_task, "hub_net", NET_TASK_STACK, NULL, NET_TASK_PRIO, NULL);
 }

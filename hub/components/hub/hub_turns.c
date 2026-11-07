@@ -31,8 +31,11 @@ typedef struct {
 static const hub_turns_ops_t *s_ops;
 static int s_wait_ms;
 static int64_t s_hold_ms;
+static int64_t s_cap_ms;
+static int64_t s_started_at;
 static bool s_running;
 static bool s_finished;
+static bool s_sent;                /* Muse accepted this turn's text (the hub's own "sent" line) */
 static bool s_detached;            /* the request stopped waiting: hold the result */
 static HUB_PSRAM_BSS msg_t s_msgs[MSG_MAX];
 static char s_error[ERROR_MAX];    /* non-empty: the turn failed */
@@ -40,12 +43,13 @@ static HUB_PSRAM_BSS char s_held[HUB_REPLY_MAX];
 static bool s_has_held;
 static int64_t s_held_at;
 
-void hub_turns_init(const hub_turns_ops_t *ops, const int wait_ms, const int64_t hold_ms)
+void hub_turns_init(const hub_turns_ops_t *ops, const int wait_ms, const int64_t hold_ms, const int64_t cap_ms)
 {
     s_ops = ops;
     s_wait_ms = wait_ms;
     s_hold_ms = hold_ms;
-    s_running = s_finished = s_detached = s_has_held = false;
+    s_cap_ms = cap_ms;
+    s_running = s_finished = s_detached = s_has_held = s_sent = false;
     s_error[0] = '\0';
     memset(s_msgs, 0, sizeof(s_msgs));
 }
@@ -102,12 +106,30 @@ static void set_error(const char *text)
     }
 }
 
+/*
+ * Before the hub's own "sent" line, the lines on the console belong to another
+ * turn, except a refusal of this one (not set up, busy, can't reach Muse).
+ * Call with the lock held.
+ */
+static bool accepts_before_sent(const char *type, const char *text)
+{
+    if (strcmp(type, "sent") == 0) {
+        s_sent = true;
+        return false;
+    }
+    return strcmp(type, "error") == 0 && !(text && strstr(text, "INTERRUPTED"));
+}
+
 void hub_turns_on_event(const char *type, const char *fields, const char *text)
 {
     s_ops->lock();
     if (!s_running) {
         s_ops->unlock();
         return;                    /* not ours: a typed turn from the USB console */
+    }
+    if (!s_sent && !accepts_before_sent(type, text)) {
+        s_ops->unlock();
+        return;
     }
     const bool is_final = strcmp(type, "final") == 0;
     if (is_final || strcmp(type, "text") == 0) {
@@ -182,6 +204,9 @@ void hub_turns_ask(const char *prompt, char *out, const size_t out_len)
             return;
         }
     }
+    if (s_running && s_ops->now_ms() - s_started_at > s_cap_ms) {
+        s_running = false;         /* the turn never ended: give up on it */
+    }
     if (s_running) {
         snprintf(out, out_len, "%s", HUB_STILL_WORKING);
         s_ops->unlock();
@@ -189,8 +214,9 @@ void hub_turns_ask(const char *prompt, char *out, const size_t out_len)
     }
     memset(s_msgs, 0, sizeof(s_msgs));
     s_error[0] = '\0';
-    s_finished = s_detached = false;
+    s_finished = s_detached = s_sent = false;
     s_running = true;
+    s_started_at = s_ops->now_ms();
     s_ops->reset_done();
     s_ops->unlock();
 

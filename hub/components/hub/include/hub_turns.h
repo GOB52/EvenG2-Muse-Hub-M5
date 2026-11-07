@@ -27,7 +27,8 @@ extern const char HUB_MSG_BUSY[];
 extern const char HUB_MSG_NOT_SET_UP[];
 extern const char HUB_MSG_INTERNAL[];
 
-void hub_turns_init(const hub_turns_ops_t *ops, int wait_ms, int64_t hold_ms);
+/* A turn still running after cap_ms is treated as failed by the next ask(). */
+void hub_turns_init(const hub_turns_ops_t *ops, int wait_ms, int64_t hold_ms, int64_t cap_ms);
 /* The text to answer prompt with (at most HUB_MAX_CHARS characters). Blocks up to wait_ms. */
 void hub_turns_ask(const char *prompt, char *out, size_t out_len);
 /* A typed turn's console line (muse_hatch_listener_t). */
