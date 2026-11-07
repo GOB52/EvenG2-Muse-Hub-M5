@@ -27,9 +27,7 @@ G2「Hey Even …」→ iPhone の Even アプリ (STT は Even のクラウド)
 git clone --recursive <this repo>        # 既存 clone なら: git submodule update --init
 . <esp-idf v6.0.3>/export.sh             # eim なら activate_idf_v6.0.3.sh
 
-# トークン (git-ignored)。エディタで次の 2 行を書く:
-#   CONFIG_GADGET_SDK_TOKEN="mgst_…"
-#   CONFIG_HUB_RELAY_TOKEN="<32 文字以上の乱数>"
+# トークンを書く (git-ignored。下の「トークン」を参照)
 $EDITOR hub/sdkconfig.local
 
 hub/tools/build.sh build
@@ -38,6 +36,32 @@ hub/tools/build.sh flash-monitor /dev/cu.usbmodemXXXX
 
 `hub/sdkconfig.hub` / `hub/sdkconfig.local` を変えたとき (`sdkconfig.hub` の変更を pull したときも) は
 `hub/build-sticks3/sdkconfig` を消してビルドし直す (sdkconfig の defaults は新しく作る sdkconfig にしか効かない)。
+
+### トークン
+
+- **SDK のトークン** (`CONFIG_GADGET_SDK_TOKEN`): [gadgets.muse.ai](https://gadgets.muse.ai/settings/sdk-tokens) の
+  Account > SDK tokens で発行する。取り替えたら Muse アプリでペアリングし直す。
+- **relay のトークン** (`CONFIG_HUB_RELAY_TOKEN`、Even AI の API Key): 自分のターミナルで乱数を作る (32 文字以上)。
+
+  ```sh
+  openssl rand -base64 32 | tr -d '=+/'    # 40 文字前後
+  ```
+
+  同じ値を `hub/sdkconfig.local`、Even アプリのエージェント設定の API Key、relay を使うなら `relay/.env` の
+  `RELAY_TOKEN` に入れる (片方だけ変えると HTTP 401 で届かない)。
+
+`hub/sdkconfig.local` の例 (値はダミー):
+
+```
+CONFIG_GADGET_SDK_TOKEN="mgst_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+CONFIG_HUB_RELAY_TOKEN="<上で作った乱数>"
+# side chat を使うとき (任意。「使い方」を参照)
+# CONFIG_HUB_SIDE_CHAT=y
+# CONFIG_HUB_SIDE_CHAT_ID="<UUID>"
+```
+
+- `hub/sdkconfig.local` と `relay/.env` は git の対象外。値はエディタで書く (シェルの履歴や AI との会話に打ち込むと記録に残る)。
+- 漏れたら作り直し、上の各所を同じ値に変えてから `hub/build-sticks3/sdkconfig` を消してビルドし直す。
 
 ## セットアップ
 
@@ -89,7 +113,7 @@ G2 で「Hey Even」と話しかける。返事は Muse から、テキストで
 
 | Kconfig | 既定 | 意味 |
 |---|---|---|
-| `CONFIG_HUB_RELAY_TOKEN` | (なし、必須) | Even AI の API Key。32 文字未満なら HTTP サーバを起動しない |
+| `CONFIG_HUB_RELAY_TOKEN` | (なし、必須) | Even AI の API Key (作り方は「トークン」)。32 文字未満なら HTTP サーバを起動しない |
 | `CONFIG_HUB_HTTP_PORT` | 8787 | 待ち受けポート |
 | `CONFIG_HUB_MDNS_NAME` | `muse-hub` | mDNS 名 (`<name>.local`) |
 | `CONFIG_HUB_WAIT_S` | 25 | 返事を待つ秒数 |
@@ -139,7 +163,7 @@ G2「Hey Even …」→ Even アプリ ─POST /v1/chat/completions─▶ relay 
 ```sh
 cd relay
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-# relay/.env に RELAY_TOKEN=<32 文字以上の乱数> を書く (git-ignored)。hub の CONFIG_HUB_RELAY_TOKEN と同じ値にすると切り替えが楽
+# relay/.env に RELAY_TOKEN=<32 文字以上の乱数> を書く (git-ignored、作り方は「トークン」)。hub の CONFIG_HUB_RELAY_TOKEN と同じ値にすると切り替えが楽
 .venv/bin/python -m muse_relay --port /dev/cu.usbmodemXXXX                 # 127.0.0.1:8787
 .venv/bin/python -m muse_relay --port /dev/cu.usbmodemXXXX --listen <Mac の LAN IP>:8787   # LAN で直接受ける場合
 tailscale funnel --bg 8787                                                   # インターネットに公開する場合
