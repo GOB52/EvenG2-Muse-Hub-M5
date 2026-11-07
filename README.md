@@ -163,3 +163,12 @@ Even 側の Endpoint は、LAN なら `http://<Mac の LAN IP>:8787/v1/chat/comp
 `hub/CMakeLists.txt` が SDK の `esp32/cmake/project.cmake` を取り込み、SDK の `main` と `components`
 をそのまま使う。sdkconfig は SDK の `sdkconfig.defaults` → `devices/sdkconfig.muse` →
 `devices/sdkconfig.muse-m5stack-sticks3` → `hub/sdkconfig.hub` → `hub/sdkconfig.local` の順に重ねる。
+
+ライセンス:
+
+- この repo は MIT ([`LICENSE`](LICENSE))。
+- 例外: `hub/patches/*.patch` は SDK のファイルの変更なので、SDK と同じ Apache-2.0。`hub/third_party/` (submodule) はそれぞれのライセンス。
+- 日本語の表示 (`CONFIG_MUSE_CJK_FONT`) は SDK に入っている GNU Unifont のビットマップを使う。Unifont は SIL Open Font License 1.1
+  と GPL v2 以上 (font embedding exception 付き) のどちらでも使え、この repo のファームは **OFL 1.1** で使う
+  (SDK の `esp32/components/muse/fonts/README.md`)。ビルドしたファームを配るときは、Unifont の OFL の表示と、
+  ESP-IDF・SDK・各 component のライセンス表示を同梱する。
