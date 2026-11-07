@@ -123,7 +123,7 @@ void hub_app_start(void)
         ESP_LOGE(TAG, "no memory for the hub");
         return;
     }
-    hub_turns_init(&OPS, CONFIG_HUB_WAIT_S * 1000, HOLD_MS, TURN_CAP_MS);
+    hub_turns_init(&OPS, CONFIG_HUB_WAIT_S * 1000, HOLD_MS, TURN_CAP_MS, CONFIG_HUB_MAX_CHARS);
     muse_hatch_set_listener(hub_turns_on_event);
     /* Stacks in PSRAM: the SDK's own tasks need the internal RAM. */
     if (xTaskCreateWithCaps(net_task, "hub_net", NET_TASK_STACK, NULL, NET_TASK_PRIO, NULL,

@@ -112,7 +112,7 @@ static void test_completion_json(void)
     CHECK(strcmp(cJSON_GetObjectItem(msg, "content")->valuestring, "返事") == 0);
     CHECK(strcmp(cJSON_GetObjectItem(choice, "finish_reason")->valuestring, "stop") == 0);
     cJSON_Delete(j);
-    free(s);
+    hub_proto_free(s);
 }
 
 static void test_completion_sse(void)
@@ -124,7 +124,7 @@ static void test_completion_sse(void)
     CHECK(strstr(s, "\"finish_reason\":\"stop\"") != NULL);
     size_t n = strlen(s);
     CHECK(n > 16 && strcmp(s + n - 14, "data: [DONE]\n\n") == 0);
-    free(s);
+    hub_proto_free(s);
 }
 
 void run_turns_tests(void);

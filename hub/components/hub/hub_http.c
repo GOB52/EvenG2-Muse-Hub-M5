@@ -11,6 +11,7 @@
 #include "esp_log.h"
 #include "esp_random.h"
 
+#include "hub_mem.h"
 #include "hub_proto.h"
 #include "hub_turns.h"
 
@@ -62,7 +63,7 @@ static esp_err_t probe_handler(httpd_req_t *req)
 static char *read_body(httpd_req_t *req)
 {
     const size_t len = req->content_len;
-    char *body = malloc(len + 1);
+    char *body = hub_mem_alloc(len + 1);
     size_t got = 0;
     int retries = 0;
     while (body && got < len) {
@@ -71,7 +72,7 @@ static char *read_body(httpd_req_t *req)
             continue;
         }
         if (n <= 0) {
-            free(body);
+            hub_mem_free(body);
             return NULL;
         }
         got += (size_t)n;
@@ -94,7 +95,7 @@ static esp_err_t send_reply(httpd_req_t *req, const hub_request_t *r, const char
     }
     httpd_resp_set_type(req, r->stream ? "text/event-stream; charset=utf-8" : "application/json; charset=utf-8");
     const esp_err_t err = httpd_resp_sendstr(req, out);
-    free(out);
+    hub_proto_free(out);
     return err;
 }
 
@@ -113,23 +114,23 @@ static esp_err_t completion_handler(httpd_req_t *req)
     if (!body) {
         return send_error(req, "400 Bad Request", "unreadable body");
     }
-    hub_request_t *r = malloc(sizeof(*r));
+    hub_request_t *r = hub_mem_alloc(sizeof(*r));
     const hub_req_err_t perr = r ? hub_proto_parse_request(body, req->content_len, r) : HUB_REQ_BAD_JSON;
-    free(body);
+    hub_mem_free(body);
     if (perr != HUB_REQ_OK) {
-        free(r);
+        hub_mem_free(r);
         return send_error(req, "400 Bad Request", perr == HUB_REQ_NO_USER ? "no user message" : "bad json");
     }
-    char *reply = malloc(HUB_REPLY_MAX);
+    char *reply = hub_mem_alloc(HUB_REPLY_MAX);
     if (!reply) {
-        free(r);
+        hub_mem_free(r);
         return send_error(req, "500 Internal Server Error", "no memory");
     }
     ESP_LOGI(TAG, "turn: %u bytes", (unsigned)strlen(r->prompt));
     hub_turns_ask(r->prompt, reply, HUB_REPLY_MAX);
     const esp_err_t err = send_reply(req, r, reply);
-    free(reply);
-    free(r);
+    hub_mem_free(reply);
+    hub_mem_free(r);
     return err;
 }
 

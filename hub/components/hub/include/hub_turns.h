@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define HUB_REPLY_MAX 2048
+#define HUB_REPLY_MAX 16384      /* bytes of a whole reply, terminator included */
 
 typedef struct {
     int64_t (*now_ms)(void);
@@ -27,9 +27,9 @@ extern const char HUB_MSG_BUSY[];
 extern const char HUB_MSG_NOT_SET_UP[];
 extern const char HUB_MSG_INTERNAL[];
 
-/* A turn still running after cap_ms is treated as failed by the next ask(). */
-void hub_turns_init(const hub_turns_ops_t *ops, int wait_ms, int64_t hold_ms, int64_t cap_ms);
-/* The text to answer prompt with (at most HUB_MAX_CHARS characters). Blocks up to wait_ms. */
+/* A turn still running after cap_ms is treated as failed by the next ask(). Replies get at most max_chars characters. */
+void hub_turns_init(const hub_turns_ops_t *ops, int wait_ms, int64_t hold_ms, int64_t cap_ms, size_t max_chars);
+/* The text to answer prompt with (at most max_chars characters). Blocks up to wait_ms. */
 void hub_turns_ask(const char *prompt, char *out, size_t out_len);
 /* A typed turn's console line (muse_hatch_listener_t). */
 void hub_turns_on_event(const char *type, const char *fields, const char *text);

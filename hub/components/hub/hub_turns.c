@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "hub_mem.h"
 #include "hub_proto.h"
 
 #ifdef ESP_PLATFORM
@@ -14,7 +15,8 @@
 #endif
 
 #define MSG_MAX 8
-#define MSG_BYTES 1024
+#define MSG_MIN_CAP 256            /* first allocation of a message's text; doubled as it grows */
+#define REPLY_BYTES (HUB_REPLY_MAX - 1)
 #define ERROR_MAX 160
 
 const char HUB_STILL_WORKING[] = "まだ考え中です。少ししてからもう一度話しかけてください。";
@@ -24,7 +26,9 @@ const char HUB_MSG_NOT_SET_UP[] = "Muse が未設定です。ペアリングを�
 const char HUB_MSG_INTERNAL[] = "Muse に届きませんでした (内部エラー)。";
 
 typedef struct {
-    char text[MSG_BYTES];
+    char *text;                    /* hub_mem; NULL until the first text */
+    size_t len;
+    size_t cap;
     bool used;
 } msg_t;
 
@@ -32,6 +36,7 @@ static const hub_turns_ops_t *s_ops;
 static int s_wait_ms;
 static int64_t s_hold_ms;
 static int64_t s_cap_ms;
+static size_t s_max_chars;
 static int64_t s_started_at;
 static bool s_running;
 static bool s_finished;
@@ -43,15 +48,25 @@ static HUB_PSRAM_BSS char s_held[HUB_REPLY_MAX];
 static bool s_has_held;
 static int64_t s_held_at;
 
-void hub_turns_init(const hub_turns_ops_t *ops, const int wait_ms, const int64_t hold_ms, const int64_t cap_ms)
+static void msgs_reset(void)
+{
+    for (int i = 0; i < MSG_MAX; i++) {
+        hub_mem_free(s_msgs[i].text);
+    }
+    memset(s_msgs, 0, sizeof(s_msgs));
+}
+
+void hub_turns_init(const hub_turns_ops_t *ops, const int wait_ms, const int64_t hold_ms, const int64_t cap_ms,
+                    const size_t max_chars)
 {
     s_ops = ops;
     s_wait_ms = wait_ms;
     s_hold_ms = hold_ms;
     s_cap_ms = cap_ms;
+    s_max_chars = max_chars;
     s_running = s_finished = s_detached = s_has_held = s_sent = false;
     s_error[0] = '\0';
-    memset(s_msgs, 0, sizeof(s_msgs));
+    msgs_reset();
 }
 
 static void append(char *dst, const size_t cap, const char *src)
@@ -60,6 +75,57 @@ static void append(char *dst, const size_t cap, const char *src)
     if (used + 1 < cap) {
         snprintf(dst + used, cap - used, "%s", src);
         hub_proto_utf8_trim(dst);
+    }
+}
+
+static size_t msgs_bytes(void)
+{
+    size_t n = 0;
+    for (int i = 0; i < MSG_MAX; i++) {
+        n += s_msgs[i].len;
+    }
+    return n;
+}
+
+static bool msg_reserve(msg_t *m, const size_t need)
+{
+    if (need <= m->cap) {
+        return true;
+    }
+    size_t cap = m->cap ? m->cap : MSG_MIN_CAP;
+    while (cap < need) {
+        cap *= 2;
+    }
+    char *text = hub_mem_realloc(m->text, cap);
+    if (!text) {
+        return false;
+    }
+    m->text = text;
+    m->cap = cap;
+    return true;
+}
+
+/* Appends src to m while all the messages together stay within REPLY_BYTES. Call with the lock held. */
+static void msg_append(msg_t *m, const char *src)
+{
+    const size_t used = msgs_bytes();
+    const size_t room = used < REPLY_BYTES ? REPLY_BYTES - used : 0;
+    const size_t len = strlen(src);
+    const size_t n = len < room ? len : room;
+    if (n == 0 || !msg_reserve(m, m->len + n + 1)) {
+        return;
+    }
+    memcpy(m->text + m->len, src, n);
+    m->text[m->len + n] = '\0';
+    hub_proto_utf8_trim(m->text);
+    m->len = strlen(m->text);
+}
+
+static void msg_clear(msg_t *m)
+{
+    m->len = 0;
+    if (m->text) {
+        m->text[0] = '\0';
     }
 }
 
@@ -75,7 +141,7 @@ static void build(char *out, const size_t cap)
 {
     out[0] = '\0';
     for (int i = 0; i < MSG_MAX; i++) {
-        if (!s_msgs[i].used || !s_msgs[i].text[0]) {
+        if (!s_msgs[i].used || !s_msgs[i].len) {
             continue;
         }
         if (out[0]) {
@@ -136,10 +202,10 @@ void hub_turns_on_event(const char *type, const char *fields, const char *text)
         const int i = msg_index(fields);
         if (i >= 0 && text) {
             if (is_final) {
-                s_msgs[i].text[0] = '\0';
+                msg_clear(&s_msgs[i]);
             }
             s_msgs[i].used = true;
-            append(s_msgs[i].text, MSG_BYTES, text);
+            msg_append(&s_msgs[i], text);
         }
     } else if (strcmp(type, "done") == 0 || strcmp(type, "error") == 0) {
         if (type[0] == 'e') {
@@ -172,23 +238,25 @@ static void with_note(const char *partial, char *out, const size_t out_len)
         snprintf(out, out_len, "%s", HUB_CONTINUE_NOTE);
         return;
     }
-    const size_t room = HUB_MAX_CHARS - hub_proto_utf8_chars(HUB_CONTINUE_NOTE) - 1;
-    char *clipped = malloc(HUB_REPLY_MAX);
+    const size_t room = s_max_chars - hub_proto_utf8_chars(HUB_CONTINUE_NOTE) - 1;
+    char *clipped = hub_mem_alloc(HUB_REPLY_MAX);
     if (!clipped) {
         snprintf(out, out_len, "%s", HUB_CONTINUE_NOTE);
         return;
     }
     hub_proto_clip(partial, clipped, HUB_REPLY_MAX, room);
     snprintf(out, out_len, "%s\n%s", clipped, HUB_CONTINUE_NOTE);
-    free(clipped);
+    hub_mem_free(clipped);
 }
 
 static void finish(char *out, const size_t out_len)
 {
-    char *copy = strdup(out);
+    const size_t n = strlen(out) + 1;
+    char *copy = hub_mem_alloc(n);
     if (copy) {
-        hub_proto_clip(copy, out, out_len, HUB_MAX_CHARS);
-        free(copy);
+        memcpy(copy, out, n);
+        hub_proto_clip(copy, out, out_len, s_max_chars);
+        hub_mem_free(copy);
     }
 }
 
@@ -212,7 +280,7 @@ void hub_turns_ask(const char *prompt, char *out, const size_t out_len)
         s_ops->unlock();
         return;
     }
-    memset(s_msgs, 0, sizeof(s_msgs));
+    msgs_reset();
     s_error[0] = '\0';
     s_finished = s_detached = s_sent = false;
     s_running = true;
@@ -237,11 +305,11 @@ void hub_turns_ask(const char *prompt, char *out, const size_t out_len)
         return;
     }
     s_detached = true;
-    char *partial = malloc(HUB_REPLY_MAX);
+    char *partial = hub_mem_alloc(HUB_REPLY_MAX);
     if (partial) {
         build(partial, HUB_REPLY_MAX);
     }
     s_ops->unlock();
     with_note(partial ? partial : "", out, out_len);
-    free(partial);
+    hub_mem_free(partial);
 }

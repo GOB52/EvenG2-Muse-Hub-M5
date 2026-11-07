@@ -81,7 +81,7 @@ hub_req_err_t hub_proto_parse_request(const char *body, const size_t len, hub_re
     hub_req_err_t err = HUB_REQ_NO_USER;
     const cJSON *messages = cJSON_GetObjectItemCaseSensitive(root, "messages");
     const int count = cJSON_IsArray(messages) ? cJSON_GetArraySize(messages) : 0;
-    char *text = malloc(HUB_PROMPT_MAX);
+    char *text = cJSON_malloc(HUB_PROMPT_MAX);
     for (int i = count - 1; text && i >= 0; i--) {
         const cJSON *m = cJSON_GetArrayItem(messages, i);
         const cJSON *role = cJSON_GetObjectItemCaseSensitive(m, "role");
@@ -95,7 +95,7 @@ hub_req_err_t hub_proto_parse_request(const char *body, const size_t len, hub_re
             break;
         }
     }
-    free(text);
+    cJSON_free(text);
     cJSON_Delete(root);
     return err;
 }
@@ -202,16 +202,12 @@ static cJSON *chunk_base(const char *object, const char *model, const long creat
     return root;
 }
 
+/* cJSON allocates through the SDK's hooks (PSRAM); callers free with hub_proto_free(). */
 static char *print_and_free(cJSON *root)
 {
     char *printed = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
-    if (!printed) {
-        return NULL;
-    }
-    char *out = strdup(printed);        /* plain malloc'd copy: callers free() it */
-    cJSON_free(printed);
-    return out;
+    return printed;
 }
 
 char *hub_proto_completion_json(const char *text, const char *model, const long created, const char *id)
@@ -257,12 +253,17 @@ char *hub_proto_completion_sse(const char *text, const char *model, const long c
     char *out = NULL;
     if (first && last) {
         const size_t n = strlen(first) + strlen(last) + 64;
-        out = malloc(n);
+        out = cJSON_malloc(n);
         if (out) {
             snprintf(out, n, "data: %s\n\ndata: %s\n\ndata: [DONE]\n\n", first, last);
         }
     }
-    free(first);
-    free(last);
+    cJSON_free(first);
+    cJSON_free(last);
     return out;
+}
+
+void hub_proto_free(void *p)
+{
+    cJSON_free(p);
 }
