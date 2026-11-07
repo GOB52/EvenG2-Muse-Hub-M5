@@ -62,8 +62,11 @@ static bool kept_id(char *out, const char **source)
 
 static void use(const char *id, const char *source)
 {
-    ESP_LOGI(TAG, "side chat: %s (%s)", id, source);
-    muse_hatch_set_session_id(id);
+    if (muse_hatch_set_session_id(id)) {
+        ESP_LOGI(TAG, "side chat: %s (%s)", id, source);
+    } else {
+        ESP_LOGE(TAG, "side chat: refused by the SDK; using the main chat");
+    }
 }
 
 static void side_task(void *arg)

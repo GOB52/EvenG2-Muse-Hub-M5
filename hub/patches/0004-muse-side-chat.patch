@@ -1,8 +1,8 @@
 diff --git a/esp32/components/muse/muse_chat.h b/esp32/components/muse/muse_chat.h
-index 0739166..ae73a84 100644
+index 0739166..7ac6804 100644
 --- a/esp32/components/muse/muse_chat.h
 +++ b/esp32/components/muse/muse_chat.h
-@@ -162,6 +162,15 @@ void muse_hatch_set_listener(muse_hatch_listener_t listener);
+@@ -162,6 +162,16 @@ void muse_hatch_set_listener(muse_hatch_listener_t listener);
  /* Undoes the escapes in a line typed at the console (\n \r \t \\) in place; returns the length. */
  size_t muse_hatch_unescape(char *s);
  
@@ -10,16 +10,17 @@ index 0739166..ae73a84 100644
 + * Sends every turn (typed and spoken) to the side chat `id`, a lowercase UUID,
 + * and follows that chat's replies instead of the main chat's. A side chat Muse
 + * doesn't know yet is created by the first message. Call once, before Muse
-+ * connects; a call while connected, or a second call, is ignored. Not calling
-+ * it keeps the main chat.
++ * connects; a call while connected, or a second call, is refused. One that
++ * lands as Muse is connecting takes effect from the next connection. Not
++ * calling it keeps the main chat. Returns true if the ID was accepted.
 + */
-+void muse_hatch_set_session_id(const char *id);
++bool muse_hatch_set_session_id(const char *id);
 +
  #ifdef __cplusplus
  }
  #endif
 diff --git a/esp32/components/muse/muse_chat_session.cpp b/esp32/components/muse/muse_chat_session.cpp
-index 9e53993..9192144 100644
+index 9e53993..7bd6c71 100644
 --- a/esp32/components/muse/muse_chat_session.cpp
 +++ b/esp32/components/muse/muse_chat_session.cpp
 @@ -244,6 +244,7 @@ struct turn_t {
@@ -30,7 +31,7 @@ index 9e53993..9192144 100644
      int64_t dict_id, chat_id;
      int64_t start_us, end_sent_us, chat_us, last_event_us, last_content_us;
      uint64_t sent24;         /* 24 kHz frames sent to dictation */
-@@ -292,6 +293,18 @@ static int16_t *s_pcm;       /* MINIMP3_MAX_SAMPLES_PER_FRAME */
+@@ -292,6 +293,19 @@ static int16_t *s_pcm;       /* MINIMP3_MAX_SAMPLES_PER_FRAME */
  static int16_t *s_pcm16;     /* resampled output */
  static int64_t s_last_seq;
  
@@ -38,6 +39,7 @@ index 9e53993..9192144 100644
 +static char s_session_id[SESSION_ID_MAX];   /* the side chat, set once by muse_hatch_set_session_id() */
 +static std::atomic<bool> s_session_set{false};
 +static std::atomic<bool> s_session_claimed{false};   /* a set_session_id() call got in first */
++static const char *s_sub_side;                     /* the side chat this connection's subscription follows (nullptr: main) */
 +static bool s_side_pending;                 /* the side chat isn't there yet: follow it after the next message */
 +
 +/* The side chat turns go to, or nullptr for the main chat. */
@@ -49,13 +51,22 @@ index 9e53993..9192144 100644
  static int64_t now_us(void)
  {
      return esp_timer_get_time();
-@@ -844,11 +857,28 @@ static bool resolve_vm(char *err, size_t err_cap)
+@@ -784,6 +798,7 @@ static void disconnect(const char *why)
+     for (auto &s : s_streams) {
+         s.kind = K_NONE;
+     }
++    s_sub_side = nullptr;
+     s_connected = false;
+ #if CONFIG_MUSE_REALTIME_VOICE
+     muse_voice_call_disconnected();
+@@ -844,11 +859,29 @@ static bool resolve_vm(char *err, size_t err_cap)
  static bool open_subscription(void)
  {
      s_last_seq = 0;
 -    s_conn.sub_id = open_stream(K_SUB, "POST", "/chat/subscribe", "application/json", "application/x-ndjson", "{}",
 +    s_side_pending = false;
 +    const char *side = side_chat();
++    s_sub_side = side;
 +    char body[SESSION_ID_MAX + 20];
 +    if (side) {
 +        snprintf(body, sizeof(body), "{\"session_id\":\"%s\"}", side);
@@ -79,7 +90,7 @@ index 9e53993..9192144 100644
  static bool connect_once(char *err, size_t err_cap, int *http_status)
  {
      *http_status = 0;
-@@ -1164,8 +1194,22 @@ static bool open_note(void)
+@@ -1164,8 +1197,22 @@ static bool open_note(void)
      if (!s_turn.chat_id) {
          return false;
      }
@@ -88,7 +99,7 @@ index 9e53993..9192144 100644
 +    const uint8_t *head = reinterpret_cast<const uint8_t *>(MUSE_HATCH_NOTE_HEAD);
 +    size_t head_len = sizeof(MUSE_HATCH_NOTE_HEAD) - 1;
 +    s_turn.body_sent = 0;
-+    if (const char *side = side_chat()) {
++    if (const char *side = s_sub_side) {
 +        /* The side chat goes first in the object: {"session_id":"<id>", then NOTE_HEAD without its '{'. */
 +        char prefix[SESSION_ID_MAX + 20];
 +        const int prefix_len = snprintf(prefix, sizeof(prefix), "{\"session_id\":\"%s\",", side);
@@ -104,21 +115,21 @@ index 9e53993..9192144 100644
          return false;
      }
      muse_hatch_wav_header(s_turn.note, MIC_RATE);
-@@ -1221,6 +1265,9 @@ static void send_chat(const char *text, const char *modality, bool spoken)
+@@ -1221,6 +1268,9 @@ static void send_chat(const char *text, const char *modality, bool spoken)
      cJSON *body = cJSON_CreateObject();
      cJSON_AddStringToObject(body, "message", text);
      cJSON_AddStringToObject(body, "output_modality", modality);
-+    if (const char *side = side_chat()) {
++    if (const char *side = s_sub_side) {
 +        cJSON_AddStringToObject(body, "session_id", side);
 +    }
      if (spoken) {
          cJSON_AddStringToObject(body, "device", MUSE_CHAT_SPOKEN_DEVICE);
      }
-@@ -1612,7 +1659,18 @@ static void on_chat_ack(stream_t *s)
+@@ -1612,7 +1662,18 @@ static void on_chat_ack(stream_t *s)
      s_turn.acked = true;
      mark(M_ACK);
      ESP_LOGI(TAG, "chat/stream ack: user message %s", s_turn.user_ids[0]);
-+    const char *side = side_chat();
++    const char *side = s_sub_side;
 +    const char *acked = cJSON_GetStringValue(cJSON_GetObjectItem(obj, "session_id"));
 +    if (side && acked && strcmp(acked, side) != 0) {
 +        ESP_LOGW(TAG, "Muse put the message in chat %s, not side chat %s", acked, side);
@@ -133,13 +144,13 @@ index 9e53993..9192144 100644
      emit(MUSE_HATCH_EV_SENT, nullptr);
  }
  
-@@ -1941,6 +1999,23 @@ static bool on_http_error(stream_t *s, const ApplicationResponseView &resp)
+@@ -1941,6 +2002,23 @@ static bool on_http_error(stream_t *s, const ApplicationResponseView &resp)
      memcpy(body, resp.body.data(), n);
      body[n] = '\0';
      ESP_LOGW(TAG, "stream %lld: HTTP %d %s", (long long)s->id, (int)resp.status, body);
-+    if (s->kind == K_SUB && resp.status == 404 && side_chat()) {
++    if (s->kind == K_SUB && resp.status == 404 && s_sub_side) {
 +        /* Muse doesn't know the side chat yet; the next message creates it. */
-+        ESP_LOGW(TAG, "side chat %s not created yet: following it after the next message", side_chat());
++        ESP_LOGW(TAG, "side chat %s not created yet: following it after the next message", s_sub_side);
 +        if (resp.end_body) {
 +            close_stream(s);
 +        } else {
@@ -157,7 +168,7 @@ index 9e53993..9192144 100644
      return stream_end(s, false);
  }
  
-@@ -2376,6 +2451,43 @@ extern "C" void muse_hatch_text_cancel(void)
+@@ -2376,6 +2454,44 @@ extern "C" void muse_hatch_text_cancel(void)
      post(CMD_TEXT_CANCEL, 0);
  }
  
@@ -177,25 +188,26 @@ index 9e53993..9192144 100644
 +    return true;
 +}
 +
-+extern "C" void muse_hatch_set_session_id(const char *id)
++extern "C" bool muse_hatch_set_session_id(const char *id)
 +{
 +    if (s_connected) {
 +        ESP_LOGE(TAG, "side chat can't be set while connected; using the main chat");
-+        return;
++        return false;
 +    }
 +    if (s_session_claimed.exchange(true)) {
 +        ESP_LOGW(TAG, "side chat already set; ignoring another");
-+        return;
++        return false;
 +    }
 +    if (!session_id_ok(id)) {
 +        s_session_claimed.store(false);   /* released: a correct call can still follow */
 +        ESP_LOGE(TAG, "side chat ID must be lowercase hex and dashes, under %d chars; using the main chat",
 +                 SESSION_ID_MAX);
-+        return;
++        return false;
 +    }
 +    strlcpy(s_session_id, id, sizeof(s_session_id));
 +    s_session_set.store(true, std::memory_order_release);
 +    ESP_LOGI(TAG, "side chat %s", s_session_id);
++    return true;
 +}
 +
  extern "C" muse_hatch_ev_t muse_hatch_turn_event(char *text, size_t cap)
