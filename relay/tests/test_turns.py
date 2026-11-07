@@ -2,8 +2,12 @@ import threading
 
 import pytest
 
-from muse_relay.openai_api import MAX_CHARS
-from muse_relay.turns import CONTINUE_NOTE, MSG_INTERNAL, STILL_WORKING, LinkError, TurnManager
+from muse_relay.openai_api import MAX_CHARS, split_page
+from muse_relay.turns import (CONTINUE_NOTE, EMPTY_NOTE, MSG_INTERNAL, PAGE_NOTE, STILL_WORKING, LinkError,
+                              TurnManager)
+
+PAGE_CHARS = 300
+PAGE_ROOM = PAGE_CHARS - len(PAGE_NOTE) - 1
 
 
 class FakeLink:
@@ -126,6 +130,79 @@ def test_unexpected_error_still_replies_and_leaves_manager_idle():
     assert turns.ask("q") == MSG_INTERNAL
     assert not turns.busy()
     assert turns.ask("q") == MSG_INTERNAL
+
+
+def _unpage(page):
+    suffix = "\n" + PAGE_NOTE
+    return page[:-len(suffix)] if page.endswith(suffix) else page
+
+
+def test_long_reply_is_paged():
+    link = FakeLink(reply="あ" * 700)
+    turns = TurnManager(link, wait_s=2, max_chars=PAGE_CHARS)
+    pages = [turns.ask("q"), turns.ask("続き"), turns.ask("続き")]
+    assert all(len(p) <= PAGE_CHARS for p in pages)
+    assert pages[0].endswith("\n" + PAGE_NOTE) and pages[1].endswith("\n" + PAGE_NOTE)
+    assert PAGE_NOTE not in pages[2]
+    assert "".join(_unpage(p) for p in pages) == "あ" * 700
+    assert link.prompts == ["q"]
+    link.reply = "次"
+    assert turns.ask("次") == "次"
+    assert link.prompts == ["q", "次"]
+
+
+def test_page_split_prefers_a_sentence_end():
+    turns = TurnManager(FakeLink(reply="あ" * 250 + "。" + "い" * 200), wait_s=2, max_chars=PAGE_CHARS)
+    assert turns.ask("q") == "あ" * 250 + "。\n" + PAGE_NOTE
+    assert turns.ask("続き") == "い" * 200
+
+
+def test_page_split_ignores_an_early_sentence_end():
+    turns = TurnManager(FakeLink(reply="あ" * 100 + "。" + "い" * 300), wait_s=2, max_chars=PAGE_CHARS)
+    out = turns.ask("q")
+    assert out.endswith("\n" + PAGE_NOTE) and len(out) == PAGE_CHARS
+
+
+def test_split_page_strips_newlines_at_the_cut():
+    assert split_page("あ" * 250 + "\n\n" + "い" * 200, PAGE_ROOM) == ("あ" * 250, "い" * 200)
+    assert split_page("abcd！efgh", 5) == ("abcd！", "efgh")
+    assert split_page("あいう", 5) == ("あいう", "")
+
+
+def test_held_page_expires():
+    clock = Clock()
+    link = FakeLink(reply="あ" * 700)
+    turns = TurnManager(link, wait_s=2, hold_s=600, clock=clock, max_chars=PAGE_CHARS)
+    assert turns.ask("q1").endswith(PAGE_NOTE)
+    clock.now += 601
+    link.reply = "新しい返事"
+    assert turns.ask("q2") == "新しい返事"
+    assert link.prompts == ["q1", "q2"]
+
+
+def test_timeout_held_long_reply_is_paged():
+    link = FakeLink(reply="あ" * 500, auto=False)
+    turns = TurnManager(link, wait_s=0.2, max_chars=PAGE_CHARS)
+    assert turns.ask("q1") == CONTINUE_NOTE
+    link.release()
+    _wait_idle(turns)
+    assert turns.ask("q2") == "あ" * PAGE_ROOM + "\n" + PAGE_NOTE
+    assert turns.ask("q3") == "あ" * (500 - PAGE_ROOM)
+    assert link.prompts == ["q1"]
+
+
+@pytest.mark.parametrize("reply", ["", "\n\n"])
+def test_empty_reply_gives_the_note(reply):
+    assert TurnManager(FakeLink(reply=reply), wait_s=2).ask("q") == EMPTY_NOTE
+
+
+def test_empty_held_reply_gives_the_note():
+    link = FakeLink(reply="", auto=False)
+    turns = TurnManager(link, wait_s=0.2)
+    turns.ask("q1")
+    link.release()
+    _wait_idle(turns)
+    assert turns.ask("q2") == EMPTY_NOTE
 
 
 def _wait_idle(turns):

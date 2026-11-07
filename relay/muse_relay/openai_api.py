@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Optional
 
-MAX_CHARS = 2000       # the G2 scrolls; this only bounds the reply
+MAX_CHARS = 2000       # a page of a reply; the G2 scrolls
 
 
 class BadRequest(Exception):
@@ -43,6 +43,21 @@ def extract_prompt(body: dict) -> str:
 
 def clip(text: str, limit: int = MAX_CHARS) -> str:
     return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+PAGE_BREAKS = ("。", "！", "？", "\n")
+
+
+def split_page(text: str, room: int) -> tuple[str, str]:
+    """The first page of at most room characters and the rest. The cut goes right after the last
+    "。", "！", "？" or newline in the page's last 20%, else at room characters."""
+    if len(text) <= room:
+        return text, ""
+    head = text[:room]
+    cut = max(head.rfind(c) for c in PAGE_BREAKS) + 1
+    if cut <= room - room // 5:
+        cut = room
+    return head[:cut].rstrip("\n"), text[cut:].lstrip("\n")
 
 
 def check_auth(header: str, token: str) -> bool:
