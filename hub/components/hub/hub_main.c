@@ -13,6 +13,7 @@
 #include "sdkconfig.h"
 
 #include "hub_http.h"
+#include "hub_mem.h"
 #include "hub_turns.h"
 #include "muse_chat.h"
 #include "muse_state.h"
@@ -40,10 +41,14 @@ static void signal_done(void) { xSemaphoreGive(s_done); }
 
 static bool start_turn(const char *prompt)
 {
-    char *copy = strdup(prompt);       /* muse_hatch_text_turn takes and frees it */
+    /* PSRAM: up to HUB_PROMPT_MAX bytes held for the whole turn. muse_hatch_text_turn takes it and
+     * frees it with free(), which also releases heap_caps blocks. */
+    const size_t n = strlen(prompt) + 1;
+    char *copy = hub_mem_alloc(n);
     if (!copy) {
         return false;
     }
+    memcpy(copy, prompt, n);
     muse_hatch_text_turn(copy);
     return true;
 }
