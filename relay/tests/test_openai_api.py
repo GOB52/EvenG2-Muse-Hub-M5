@@ -310,3 +310,50 @@ def test_post_without_length_or_chunked_is_400(server):
 def test_short_token_is_refused(token):
     with pytest.raises(ValueError):
         make_handler(FakeTurns(), token)
+
+
+def _get(url, path, token=TOKEN):
+    headers = {"Authorization": "Bearer " + token} if token else {}
+    req = urllib.request.Request(url + path, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status, r.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8")
+
+
+@pytest.mark.parametrize("path", ["/v1/chat/completions", "/chat/completions"])
+def test_get_on_completions_answers_ok_when_authorized(server, path):
+    url, turns, _ = server
+    status, body = _get(url, path)
+    assert status == 200
+    assert json.loads(body)["status"] == "ok"
+    assert turns.asked == []
+
+
+def test_get_on_completions_without_token_is_401(server):
+    url, _, _ = server
+    assert _get(url, "/v1/chat/completions", token="")[0] == 401
+
+
+def test_get_on_completions_is_captured(server):
+    url, _, captures = server
+    _get(url, "/v1/chat/completions")
+    recs = [json.loads(f.read_text(encoding="utf-8")) for f in captures.glob("*.json")]
+    assert [(r["method"], r["path"]) for r in recs] == [("GET", "/v1/chat/completions")]
+
+
+def test_scanner_paths_are_not_captured(server):
+    url, _, captures = server
+    for path in ("/", "/.env", "/wp-login.php", "/actuator/env"):
+        _get(url, path, token="")
+    assert list(captures.glob("*.json")) == []
+
+
+def test_rejected_api_paths_are_still_captured(server):
+    url, _, captures = server
+    _get(url, "/v1/unknown", token="")
+    _get(url, "/v1/chat/completions", token="")
+    recs = sorted((json.loads(f.read_text(encoding="utf-8")) for f in captures.glob("*.json")),
+                  key=lambda r: r["rejected"])
+    assert [r["rejected"] for r in recs] == [401, 404]

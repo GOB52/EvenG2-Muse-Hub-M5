@@ -101,6 +101,8 @@ MAX_REJECTED_CAPTURES = 20    # rejected requests saved per process: the net is 
 CHUNK_LINE_MAX = 64
 HEX_SIZE = re.compile(rb"[0-9a-fA-F]+")
 IDLE_TIMEOUT_S = 30
+# Rejected requests are captured only on API-shaped paths: scanners hit everything else.
+CAPTURE_PREFIXES = ("/v1/", "/chat/", "/models")
 
 
 class BodyError(Exception):
@@ -192,7 +194,8 @@ def make_handler(turns, token: str, capture_dir: Optional[Path] = None):
         def _reject(self, status: int, message: str, method: str = "", path: str = "") -> None:
             """Answers without reading the body, so the connection can't be reused."""
             self.close_connection = True
-            if status in (401, 404) and capture_dir is not None and may_capture_rejected():
+            if (status in (401, 404) and capture_dir is not None and path.startswith(CAPTURE_PREFIXES)
+                    and may_capture_rejected()):
                 save_capture(capture_dir, method, path, self.headers, None, rejected=status)
             self._send_json(status, {"error": {"message": message}})
 
@@ -210,7 +213,7 @@ def make_handler(turns, token: str, capture_dir: Optional[Path] = None):
 
         def do_GET(self) -> None:
             path = self.path.split("?", 1)[0]
-            if path not in MODELS_PATHS:
+            if path not in MODELS_PATHS + COMPLETION_PATHS:
                 self._reject(404, "not found", "GET", path)
             elif not self._authorized():
                 self._reject(401, "unauthorized", "GET", path)
@@ -218,8 +221,12 @@ def make_handler(turns, token: str, capture_dir: Optional[Path] = None):
                 if self._has_body():
                     self.close_connection = True      # leftover bytes must not parse as a request
                 self._capture("GET", path, b"")
-                self._send_json(200, {"object": "list", "data": [
-                    {"id": MODEL_ID, "object": "model", "created": 0, "owned_by": "muse-relay"}]})
+                if path in COMPLETION_PATHS:
+                    # Clients probe the endpoint with a GET when it is saved.
+                    self._send_json(200, {"object": "muse-relay", "status": "ok", "model": MODEL_ID})
+                else:
+                    self._send_json(200, {"object": "list", "data": [
+                        {"id": MODEL_ID, "object": "model", "created": 0, "owned_by": "muse-relay"}]})
 
         def do_POST(self) -> None:
             path = self.path.split("?", 1)[0]
