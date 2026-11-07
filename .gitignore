@@ -1,0 +1,18 @@
+# ESP-IDF (hub/)
+hub/build/
+hub/build-*/
+hub/managed_components/
+hub/dependencies.lock
+hub/sdkconfig
+hub/sdkconfig.old
+
+# SDK token (CONFIG_GADGET_SDK_TOKEN). Never commit.
+hub/sdkconfig.local
+
+# Tools / OS
+*.log
+.cache/
+__pycache__/
+*.pyc
+eim_config.toml
+.DS_Store
