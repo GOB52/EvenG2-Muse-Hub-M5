@@ -1,6 +1,8 @@
 """OpenAI-compatible chat completions for Even AI's custom agent."""
 import hmac
 import json
+import re
+import threading
 import time
 import uuid
 from datetime import datetime
@@ -33,7 +35,7 @@ def extract_prompt(body: dict) -> str:
         raise BadRequest("messages missing")
     for m in reversed(messages):
         if isinstance(m, dict) and m.get("role") == "user":
-            text = _content_text(m.get("content")).strip()
+            text = _content_text(m.get("content")).strip().encode("utf-8", "replace").decode("utf-8")
             if text:
                 return text
     raise BadRequest("no user message")
@@ -95,6 +97,9 @@ MODELS_PATHS = ("/v1/models", "/models")
 MODEL_ID = "muse"
 MAX_BODY = 64 * 1024          # bytes; the relay may face the internet
 MIN_TOKEN_LEN = 32
+MAX_REJECTED_CAPTURES = 20    # rejected requests saved per process: the net is noisy
+CHUNK_LINE_MAX = 64
+HEX_SIZE = re.compile(rb"[0-9a-fA-F]+")
 IDLE_TIMEOUT_S = 30
 
 
@@ -106,11 +111,16 @@ class BodyError(Exception):
         self.status = status
 
 
-def save_capture(capture_dir: Path, method: str, path: str, headers, raw: bytes) -> None:
+def save_capture(capture_dir: Path, method: str, path: str, headers, raw: Optional[bytes],
+                 rejected: Optional[int] = None) -> None:
+    """raw is None for a rejected request: its body was never read."""
     capture_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    rec = {"method": method, "path": path, "headers": redact_headers(headers),
-           "body": raw.decode("utf-8", "replace")}
+    rec = {"method": method, "path": path, "headers": redact_headers(headers)}
+    if rejected is not None:
+        rec["rejected"] = rejected
+    if raw is not None:
+        rec["body"] = raw.decode("utf-8", "replace")
     (capture_dir / f"{stamp}.json").write_text(json.dumps(rec, ensure_ascii=False, indent=2),
                                                encoding="utf-8")
 
@@ -119,11 +129,11 @@ def read_chunked(rfile, limit: int = MAX_BODY) -> bytes:
     """Decodes a chunked body; trailers are skipped."""
     out = bytearray()
     while True:
-        size_line = rfile.readline(64).split(b";", 1)[0].strip()
-        try:
-            size = int(size_line, 16)
-        except ValueError:
+        line = rfile.readline(CHUNK_LINE_MAX)
+        size_text = line.split(b";", 1)[0].strip()
+        if not line.endswith(b"\n") or not HEX_SIZE.fullmatch(size_text):
             raise BodyError(400, "bad chunk size")
+        size = int(size_text, 16)
         if size == 0:
             while rfile.readline(8192).strip():
                 pass
@@ -137,6 +147,16 @@ def read_chunked(rfile, limit: int = MAX_BODY) -> bytes:
 def make_handler(turns, token: str, capture_dir: Optional[Path] = None):
     if len(token) < MIN_TOKEN_LEN:
         raise ValueError(f"token must be at least {MIN_TOKEN_LEN} characters")
+
+    rejected_lock = threading.Lock()
+    rejected_count = [0]
+
+    def may_capture_rejected() -> bool:
+        with rejected_lock:
+            if rejected_count[0] >= MAX_REJECTED_CAPTURES:
+                return False
+            rejected_count[0] += 1
+            return True
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -169,10 +189,17 @@ def make_handler(turns, token: str, capture_dir: Optional[Path] = None):
             self._send(status, "application/json; charset=utf-8",
                        json.dumps(obj, ensure_ascii=False).encode("utf-8"))
 
-        def _reject(self, status: int, message: str) -> None:
+        def _reject(self, status: int, message: str, method: str = "", path: str = "") -> None:
             """Answers without reading the body, so the connection can't be reused."""
             self.close_connection = True
+            if status in (401, 404) and capture_dir is not None and may_capture_rejected():
+                save_capture(capture_dir, method, path, self.headers, None, rejected=status)
             self._send_json(status, {"error": {"message": message}})
+
+        def _has_body(self) -> bool:
+            if "chunked" in self.headers.get("Transfer-Encoding", "").lower():
+                return True
+            return self.headers.get("Content-Length", "0").strip() not in ("", "0")
 
         def _authorized(self) -> bool:
             return check_auth(self.headers.get("Authorization", ""), token)
@@ -184,10 +211,12 @@ def make_handler(turns, token: str, capture_dir: Optional[Path] = None):
         def do_GET(self) -> None:
             path = self.path.split("?", 1)[0]
             if path not in MODELS_PATHS:
-                self._reject(404, "not found")
+                self._reject(404, "not found", "GET", path)
             elif not self._authorized():
-                self._reject(401, "unauthorized")
+                self._reject(401, "unauthorized", "GET", path)
             else:
+                if self._has_body():
+                    self.close_connection = True      # leftover bytes must not parse as a request
                 self._capture("GET", path, b"")
                 self._send_json(200, {"object": "list", "data": [
                     {"id": MODEL_ID, "object": "model", "created": 0, "owned_by": "muse-relay"}]})
@@ -195,10 +224,10 @@ def make_handler(turns, token: str, capture_dir: Optional[Path] = None):
         def do_POST(self) -> None:
             path = self.path.split("?", 1)[0]
             if path not in COMPLETION_PATHS:
-                self._reject(404, "not found")
+                self._reject(404, "not found", "POST", path)
                 return
             if not self._authorized():
-                self._reject(401, "unauthorized")
+                self._reject(401, "unauthorized", "POST", path)
                 return
             try:
                 raw = self._read_body()

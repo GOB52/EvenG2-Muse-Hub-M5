@@ -8,6 +8,8 @@ import threading
 import time
 from typing import Callable, Optional
 
+from .openai_api import MAX_CHARS, clip
+
 WAIT_S = 25.0
 HOLD_S = 10 * 60.0
 STILL_WORKING = "まだ考え中です。少ししてからもう一度話しかけてください。"
@@ -66,7 +68,9 @@ class TurnManager:
                 return turn.result()
             turn.detached = True
             partial = turn.partial()
-        return f"{partial}\n{CONTINUE_NOTE}" if partial else CONTINUE_NOTE
+        if not partial:
+            return CONTINUE_NOTE
+        return f"{clip(partial, MAX_CHARS - len(CONTINUE_NOTE) - 1)}\n{CONTINUE_NOTE}"
 
     def _run(self, turn: _Turn, text: str) -> None:
         try:

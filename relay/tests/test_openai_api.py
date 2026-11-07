@@ -84,7 +84,7 @@ from http.server import ThreadingHTTPServer
 
 import socket
 
-from muse_relay.openai_api import MAX_BODY, make_handler
+from muse_relay.openai_api import MAX_BODY, MAX_REJECTED_CAPTURES, make_handler
 
 TOKEN = "x" * 40
 
@@ -202,11 +202,47 @@ def test_capture_saves_request_without_token(server):
     assert json.loads(rec["body"])["messages"][0]["content"] == "こんにちは"
 
 
-def test_unauthorized_or_unknown_requests_are_not_captured(server):
-    url, _, captures = server
-    _post(url, USER, token="nope")
+def test_rejected_requests_are_captured_without_body_or_token(server):
+    url, turns, captures = server
+    _post(url, USER, token="nope-secret-token")
     _post(url, USER, path="/v1/other")
-    assert not captures.exists() or list(captures.glob("*.json")) == []
+    recs = sorted((json.loads(f.read_text(encoding="utf-8")) for f in captures.glob("*.json")),
+                  key=lambda r: r["rejected"])
+    assert [r["rejected"] for r in recs] == [401, 404]
+    assert all("body" not in r for r in recs)
+    assert "nope-secret-token" not in json.dumps(recs)
+    assert turns.asked == []
+
+
+def test_rejected_captures_are_capped(server):
+    url, _, captures = server
+    for _ in range(MAX_REJECTED_CAPTURES + 5):
+        _post(url, USER, token="nope")
+    assert len(list(captures.glob("*.json"))) == MAX_REJECTED_CAPTURES
+
+
+@pytest.mark.parametrize("size_line", [b"-1", b"0x10", b"1_0", b"5;" + b"e" * 100])
+def test_bad_chunk_size_is_400(server, size_line):
+    url, turns, _ = server
+    req = (f"POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {TOKEN}\r\n"
+           "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n").encode() \
+        + size_line + b"\r\nhello\r\n0\r\n\r\n"
+    assert _raw(url, req).startswith(b"HTTP/1.1 400")
+    assert turns.asked == []
+
+
+def test_get_with_body_closes_the_connection(server):
+    url, _, _ = server
+    req = (f"GET /v1/models HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {TOKEN}\r\n"
+           "Content-Length: 5\r\n\r\nhello").encode()
+    assert _raw(url, req).startswith(b"HTTP/1.1 200")      # _raw reads until the server closes
+
+
+def test_extract_prompt_replaces_lone_surrogates():
+    body = {"messages": [{"role": "user", "content": "a\ud800b"}]}
+    prompt = extract_prompt(body)
+    assert prompt == "a?b"
+    prompt.encode("utf-8")
 
 
 def test_oversized_content_length_is_413_without_reading(server):
@@ -216,9 +252,13 @@ def test_oversized_content_length_is_413_without_reading(server):
     port = int(url.rsplit(":", 1)[1])
     with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
         sock.sendall(head)
-        resp = sock.recv(4096)
+        resp = b""
+        while True:                        # reads to EOF: the server must close the connection
+            part = sock.recv(4096)
+            if not part:
+                break
+            resp += part
         assert resp.startswith(b"HTTP/1.1 413")
-        assert sock.recv(4096) == b""      # connection closed by the server
     assert turns.asked == []
 
 
