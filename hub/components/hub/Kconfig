@@ -38,4 +38,22 @@ menu "Muse hub (Even AI endpoint)"
         help
             Characters returned at once for 「終わりまで」/「全部」; the G2 scrolls.
 
+    config HUB_SIDE_CHAT
+        bool "Send the gadget's turns to a Muse side chat"
+        depends on MUSE_HATCH
+        default n
+        help
+            Every turn (from the G2 and spoken on the StickS3) goes to one
+            side chat of Muse instead of the main chat, and replies are read
+            from it. Off: the main chat, as before.
+
+    config HUB_SIDE_CHAT_ID
+        string "Side chat ID (a lowercase UUID; empty: make one and keep it in NVS)"
+        depends on HUB_SIDE_CHAT
+        default ""
+        help
+            A side chat Muse already has, or a new UUID (the first message
+            creates the chat). Empty: the hub makes one on first boot and
+            keeps it in NVS (a full flash erase makes a new one).
+
 endmenu
