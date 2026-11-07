@@ -42,7 +42,7 @@ hub/tools/build.sh flash-monitor /dev/cu.usbmodemXXXX
 ### トークン
 
 - **SDK のトークン** (`CONFIG_GADGET_SDK_TOKEN`): [gadgets.muse.ai](https://gadgets.muse.ai/settings/sdk-tokens) の
-  Account > SDK tokens で発行する。取り替えたら Muse アプリでペアリングし直す。
+  Account > SDK tokens で発行する。取り替えたらペアリングし直す (「セットアップ」の 2)。
 - **relay のトークン** (`CONFIG_HUB_RELAY_TOKEN`、Even AI の API Key): 自分のターミナルで乱数を作る (32 文字以上)。
 
   ```sh
@@ -71,6 +71,9 @@ CONFIG_HUB_RELAY_TOKEN="<上で作った乱数>"
    ペアリングの間は共有の画面を開いておく (つながっている端末が無いと電波が止まり、StickS3 側で `reason=201` になる)。
 2. **ペアリング**: Muse アプリの Settings > Devices で Developer mode をオンにし、Add Device から `MuseGadget-XXXXXX` を追加する。
    Wi-Fi は iPhone の共有を選ぶ。Wi-Fi を変えるときは、アプリでリンクを解除 → StickS3 のボタンを 5 秒長押し → 追加し直す。
+   **SDK のトークンを取り替えたとき**も、書き込んだ後にペアリングし直す: 起動ログが `setup=advertising` (Muse につながらず
+   ペアリング待ち) になるので、アプリで古いリンクを解除 → Add Device で追加し直す (長押しは要らない)。relay のトークンは
+   ペアリングと関係ない (Even アプリの API Key を同じ値にするだけ)。
 3. **iPhone のローカルネットワーク許可**: 設定 → プライバシーとセキュリティ → ローカルネットワーク で **Even Realities をオン**
    (オフだと HUD に「AI サーバーエラー」)。
 4. **Even 側の登録**: [Even Hub](https://hub.evenrealities.com/login) に Even アプリと同じアカウントでサインインし、アプリを完全に

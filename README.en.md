@@ -45,7 +45,7 @@ delete `hub/build-sticks3/sdkconfig` and rebuild (sdkconfig defaults only seed a
 ### Tokens
 
 - **SDK token** (`CONFIG_GADGET_SDK_TOKEN`): issue one at [gadgets.muse.ai](https://gadgets.muse.ai/settings/sdk-tokens)
-  (Account > SDK tokens). After replacing it, pair the gadget again in the Muse app.
+  (Account > SDK tokens). After replacing it, pair again ("Setup", step 2).
 - **Relay token** (`CONFIG_HUB_RELAY_TOKEN`, the Even AI API key): make a random string (32+ characters) in your own terminal.
 
   ```sh
@@ -74,6 +74,9 @@ CONFIG_HUB_RELAY_TOKEN="<the random string made above>"
    Keep the hotspot screen open while pairing (with no device connected the hotspot stops, and the StickS3 logs `reason=201`).
 2. **Pairing**: in the Muse app, Settings > Devices, turn on Developer mode and add `MuseGadget-XXXXXX` with Add Device.
    Choose the iPhone's hotspot for Wi-Fi. To change Wi-Fi: unlink in the app → hold the StickS3's button for 5 s → add it again.
+   **After replacing the SDK token**, pair again once flashed: the boot log shows `setup=advertising` (not connected to Muse,
+   waiting to pair), so unlink the old link in the app → add it again with Add Device (no long press needed). The relay token has
+   nothing to do with pairing (just set the Even app's API Key to the same value).
 3. **iPhone Local Network permission**: Settings → Privacy & Security → Local Network, turn **Even Realities on**
    (off, the HUD shows an "AI server error").
 4. **Registering with Even**: sign in to [Even Hub](https://hub.evenrealities.com/login) with the Even app's account, then quit
