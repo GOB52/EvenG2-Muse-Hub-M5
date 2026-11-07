@@ -6,6 +6,7 @@
 #   hub/tools/build.sh monitor       PORT
 #   hub/tools/build.sh flash-monitor PORT
 #
+# build applies hub/patches/ to the SDK submodule first (tools/apply_patches.sh).
 # Activate ESP-IDF v6.0.3 first (IDF_PATH must be set). Set IDF_PY to use
 # another idf.py front end (e.g. a wrapper that serializes configure).
 # hub/sdkconfig.local, if present, is applied last (put CONFIG_GADGET_SDK_TOKEN
@@ -39,6 +40,7 @@ common=(-C "$hub_dir" -B "$build_dir" -DIDF_TARGET=esp32s3
 
 case $cmd in
     build)
+        "$hub_dir/tools/apply_patches.sh"
         "${idf[@]}" "${common[@]}" build ;;
     flash|monitor|flash-monitor)
         [ -n "$port" ] || { echo "PORT is required (e.g. /dev/cu.usbmodem1101)" >&2; exit 1; }
