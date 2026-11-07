@@ -1,4 +1,4 @@
-# Muse Gadget firmware for the M5StackMuseEvenG2 hub.
+# Muse Gadget firmware for the EvenG2-Muse-Hub-M5 hub.
 # The SDK's cmake/project.cmake adds the SDK's main/ and components/ when it is
 # included from a project outside the SDK tree.
 cmake_minimum_required(VERSION 3.16)
