@@ -9,7 +9,7 @@ from .turns import LinkError
 from .widgets import Widgets
 
 BUSY_MARK = "BUSY WITH A VOICE TURN"
-MSG_BUSY = "StickS3 で音声の会話中です。終わってからもう一度どうぞ。"
+MSG_BUSY = "Gadget で音声の会話中です。終わってからもう一度どうぞ。"
 REASON_MAX = 60
 MUSE_ERROR_MARK = "Muse: "      # the board answered with an error: the cable is fine, keep the port
 MSG_INTERNAL = "Muse に届きませんでした (内部エラー)。"
@@ -32,7 +32,7 @@ def _reason(msg: str) -> str:
 
 
 class BoardLink:
-    """One board, one turn at a time. The port stays open: opening it resets the StickS3."""
+    """One board, one turn at a time. The port stays open: opening it resets the Gadget."""
 
     def __init__(self, port: str, chat_module=None) -> None:
         self._chat = chat_module or _load_chat()

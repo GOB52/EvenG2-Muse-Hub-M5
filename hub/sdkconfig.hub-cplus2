@@ -1,0 +1,8 @@
+# Hub settings for the M5Stack StickC Plus2 (BOARD=cplus2), applied after
+# sdkconfig.hub.
+#
+# The Plus2 has 2 MB of PSRAM. With the voice session's full buffers (about
+# 830 KB) the text turns' chat session can't connect once Muse is up
+# ("connect failed: Out of memory"). The SDK's Kconfig help says 2 MB boards
+# turn this on, but its Plus2 overlay doesn't.
+CONFIG_MUSE_HATCH_COMPACT_BUFFERS=y
