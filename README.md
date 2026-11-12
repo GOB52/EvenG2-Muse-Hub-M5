@@ -18,7 +18,7 @@ G2「Hey Even …」→ iPhone の Even アプリ (STT は Even のクラウド)
 
 ## 必要なもの
 
-- Gadget にする M5Stack のデバイス: **StickS3** または **StickC Plus2** (違いは「対応デバイス」)
+- Gadget にする M5Stack のデバイス: **StickS3**、**StickC Plus2**、**StopWatch** のどれか (違いは「対応デバイス」)
 - Even Realities G2、iPhone (Even アプリと Muse アプリ)
 - ESP-IDF **v6.0.3** (Muse Gadget SDK がこの版のみ対応)
 - [Muse の SDK トークン](https://gadgets.muse.ai/settings/sdk-tokens)
@@ -36,7 +36,7 @@ $EDITOR hub/sdkconfig.local
 hub/tools/build.sh build
 hub/tools/build.sh flash-monitor /dev/cu.usbmodemXXXX
 
-# StickC Plus2 は BOARD=cplus2 を付ける (ビルド先は hub/build-cplus2)
+# StickS3 以外は BOARD を付ける (StickC Plus2 は cplus2、StopWatch は stopwatch。ビルド先は hub/build-<board>)
 BOARD=cplus2 hub/tools/build.sh build
 BOARD=cplus2 hub/tools/build.sh flash-monitor /dev/cu.usbserial-XXXX
 ```
@@ -138,11 +138,12 @@ G2 で「Hey Even」と話しかける。返事は Muse から、テキストで
 |---|---|---|---|---|
 | M5Stack StickS3 | `sticks3` (既定) | ESP32-S3 / 8 MB | `/dev/cu.usbmodem*` | |
 | M5Stack StickC Plus2 | `cplus2` | ESP32 / 2 MB | `/dev/cu.usbserial-*` | 書き込みは 230400 baud (USB-UART が速いと途切れる)。返事の音声はブザーなので小さい |
+| M5Stack StopWatch | `stopwatch` | ESP32-S3 / 8 MB | `/dev/cu.usbmodem*` | フラッシュ 16 MB (`hub/sdkconfig.hub-stopwatch` で 16 MB のパーティション表)。内部 RAM が最も厳しい |
 
-- どちらもシリアルポートを開くとリセットされる。
+- どれもシリアルポートを開くとリセットされる。
 - StickC Plus2 は PSRAM が 2 MB なので、音声セッションのバッファを小さくする (`hub/sdkconfig.hub-cplus2` の
   `CONFIG_MUSE_HATCH_COMPACT_BUFFERS=y`)。無いとテキストターンの接続が `connect failed: Out of memory` になる。
-- 2 台とも電源を入れると mDNS 名 (`muse-hub.local`) がぶつかる。使うのは 1 台にするか、`CONFIG_HUB_MDNS_NAME` を変える。
+- 2 台以上の電源を入れると mDNS 名 (`muse-hub.local`) がぶつかる。使うのは 1 台にするか、`CONFIG_HUB_MDNS_NAME` を変える。
 
 ## 開発者向け
 
@@ -156,7 +157,7 @@ G2 で「Hey Even」と話しかける。返事は Muse から、テキストで
     接続中の設定は受け付けない。
 - **hub component** (`hub/components/hub/`): `hub_proto` (リクエスト解釈・応答生成・UTF-8・ページ分割・言葉の判定)、
   `hub_turns` (ターン管理・保持・ページ送り)、`hub_http` (esp_http_server)、`hub_side_chat` (side chat の ID)、`hub_main` (起動・mDNS)。
-- **内部 RAM**: Gadget は内部 RAM が少ない (定常で StickS3 は約 18K、StickC Plus2 は約 35K 空き)。hub のタスクのスタックとリクエストごとのバッファは PSRAM に置き
+- **内部 RAM**: Gadget は内部 RAM が少ない (定常で StickS3 は約 18K、StickC Plus2 は約 35K、StopWatch は約 20K 空き)。hub のタスクのスタックとリクエストごとのバッファは PSRAM に置き
   (`hub_mem.h`)、HTTP サーバと mDNS は Muse への接続が 5 秒続いてから起動する (セットアップ中は SDK に譲る)。
 - **ホストテスト** (純粋処理とターン管理、Mac の cc + ASan/UBSan): `hub/test/host/run.sh` (一度 hub をビルドして cJSON を取得しておく)。
 - **Even AI のリクエスト**: POST は **iPhone の Even アプリ自身** (`User-Agent: EvenCore/1.0`) から届く。OpenAI chat completions 形式で

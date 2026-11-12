@@ -21,7 +21,7 @@ and "Localizing the keywords and notes".
 
 ## Requirements
 
-- An M5Stack device for the Gadget: **StickS3** or **StickC Plus2** (see "Supported devices" for the differences)
+- An M5Stack device for the Gadget: **StickS3**, **StickC Plus2** or **StopWatch** (see "Supported devices" for the differences)
 - Even Realities G2, an iPhone (Even app and Muse app)
 - ESP-IDF **v6.0.3** (the only version the Muse Gadget SDK supports)
 - A [Muse SDK token](https://gadgets.muse.ai/settings/sdk-tokens)
@@ -39,7 +39,7 @@ $EDITOR hub/sdkconfig.local
 hub/tools/build.sh build
 hub/tools/build.sh flash-monitor /dev/cu.usbmodemXXXX
 
-# for the StickC Plus2 add BOARD=cplus2 (it builds in hub/build-cplus2)
+# for other devices than the StickS3 add BOARD (cplus2 for the StickC Plus2, stopwatch for the StopWatch; it builds in hub/build-<board>)
 BOARD=cplus2 hub/tools/build.sh build
 BOARD=cplus2 hub/tools/build.sh flash-monitor /dev/cu.usbserial-XXXX
 ```
@@ -158,11 +158,12 @@ to use another language, change them in both the hub and the relay so the two ke
 |---|---|---|---|---|
 | M5Stack StickS3 | `sticks3` (default) | ESP32-S3 / 8 MB | `/dev/cu.usbmodem*` | |
 | M5Stack StickC Plus2 | `cplus2` | ESP32 / 2 MB | `/dev/cu.usbserial-*` | Flashed at 230400 baud (its USB-UART bridge drops out above that). Muse speaks through a buzzer, so replies are quiet |
+| M5Stack StopWatch | `stopwatch` | ESP32-S3 / 8 MB | `/dev/cu.usbmodem*` | 16 MB of flash (`hub/sdkconfig.hub-stopwatch` picks the 16 MB partition table). The tightest internal RAM |
 
-- Both reset when their serial port opens.
+- All of them reset when their serial port opens.
 - The StickC Plus2 has 2 MB of PSRAM, so the voice session's buffers are made smaller (`CONFIG_MUSE_HATCH_COMPACT_BUFFERS=y`
   in `hub/sdkconfig.hub-cplus2`). Without it the typed turns can't connect (`connect failed: Out of memory`).
-- With both powered on, their mDNS names (`muse-hub.local`) clash. Use one at a time, or change `CONFIG_HUB_MDNS_NAME`.
+- With more than one powered on, their mDNS names (`muse-hub.local`) clash. Use one at a time, or change `CONFIG_HUB_MDNS_NAME`.
 
 ## For developers
 
@@ -176,7 +177,7 @@ to use another language, change them in both the hub and the relay so the two ke
     subscription reopens after the first message's ack. Setting it while connected is refused.
 - **hub component** (`hub/components/hub/`): `hub_proto` (request parsing, responses, UTF-8, pages, keywords),
   `hub_turns` (turns, holding, paging), `hub_http` (esp_http_server), `hub_side_chat` (the side chat ID), `hub_main` (startup, mDNS).
-- **Internal RAM**: the Gadget has little internal RAM (in steady state about 18K free on the StickS3, about 35K on the StickC Plus2). The hub's task stacks and per-request buffers are in PSRAM
+- **Internal RAM**: the Gadget has little internal RAM (in steady state about 18K free on the StickS3, about 35K on the StickC Plus2, about 20K on the StopWatch). The hub's task stacks and per-request buffers are in PSRAM
   (`hub_mem.h`), and the HTTP server and mDNS start once Muse has been connected for 5 s (setup leaves the RAM to the SDK).
 - **Host tests** (pure code and turn handling, the Mac's cc with ASan/UBSan): `hub/test/host/run.sh` (build the hub once first to fetch cJSON).
 - **Even AI's requests**: the POST comes from **the Even app on the iPhone itself** (`User-Agent: EvenCore/1.0`), in OpenAI chat completions form

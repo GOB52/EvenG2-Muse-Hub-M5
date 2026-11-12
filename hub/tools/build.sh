@@ -7,8 +7,9 @@
 #   hub/tools/build.sh flash-monitor PORT
 #
 # BOARD picks the M5Stack device (default sticks3):
-#   sticks3  M5Stack StickS3       (esp32s3, build in hub/build-sticks3)
-#   cplus2   M5Stack StickC Plus2  (esp32,   build in hub/build-cplus2, flashed at 230400 baud)
+#   sticks3    M5Stack StickS3       (esp32s3, build in hub/build-sticks3)
+#   cplus2     M5Stack StickC Plus2  (esp32,   build in hub/build-cplus2, flashed at 230400 baud)
+#   stopwatch  M5Stack StopWatch     (esp32s3, build in hub/build-stopwatch)
 # e.g. BOARD=cplus2 hub/tools/build.sh build
 #
 # build applies hub/patches/ to the SDK submodule first (tools/apply_patches.sh).
@@ -40,8 +41,11 @@ case $board in
         target=esp32
         sdk_overlay=sdkconfig.muse-m5stack-stickc-plus2
         flash_baud=(-b 230400) ;;
+    stopwatch)
+        target=esp32s3
+        sdk_overlay=sdkconfig.muse-m5stack-stopwatch ;;
     *)
-        echo "unknown BOARD: $board (sticks3 or cplus2)" >&2; exit 1 ;;
+        echo "unknown BOARD: $board (sticks3, cplus2 or stopwatch)" >&2; exit 1 ;;
 esac
 build_dir=$hub_dir/build-$board
 
