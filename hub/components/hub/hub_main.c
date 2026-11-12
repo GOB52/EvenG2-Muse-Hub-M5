@@ -105,7 +105,19 @@ static bool online_long_enough(int64_t *since)
 
 static void start_endpoint(const uint16_t port)
 {
+    /* The server's and mDNS's own blocks are small, so malloc would keep them in internal RAM
+     * (CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL). Send them to PSRAM while they start: the SDK
+     * sends its tunnel keepalives only with 16 KB of DMA-capable RAM free (see sdkconfig.hub). */
+    const size_t dma_before = heap_caps_get_free_size(MALLOC_CAP_DMA);
+    heap_caps_malloc_extmem_enable(0);
     const esp_err_t err = hub_http_start(port, CONFIG_HUB_RELAY_TOKEN);
+    if (err == ESP_OK) {
+        start_mdns(port);
+    }
+    heap_caps_malloc_extmem_enable(CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL);
+    ESP_LOGI(TAG, "endpoint took %d bytes of DMA-capable RAM (%u free)",
+             (int)(dma_before - heap_caps_get_free_size(MALLOC_CAP_DMA)),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA));
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "HTTP server not started (%s): set CONFIG_HUB_RELAY_TOKEN (32+ chars)",
                  esp_err_to_name(err));
@@ -113,7 +125,6 @@ static void start_endpoint(const uint16_t port)
             vTaskDelay(portMAX_DELAY);   /* a task with a PSRAM stack can't delete itself */
         }
     }
-    start_mdns(port);
 }
 
 /*

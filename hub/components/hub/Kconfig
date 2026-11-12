@@ -43,7 +43,7 @@ menu "Muse hub (Even AI endpoint)"
         depends on MUSE_HATCH
         default n
         help
-            Every turn (from the G2 and spoken on the StickS3) goes to one
+            Every turn (from the G2 and spoken on the Gadget) goes to one
             side chat of Muse instead of the main chat, and replies are read
             from it. Off: the main chat, as before.
 

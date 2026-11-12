@@ -1,0 +1,7 @@
+# Hub settings for the M5Stack StopWatch (BOARD=stopwatch), applied after
+# sdkconfig.hub.
+#
+# The StopWatch has 16 MB of flash: use the SDK's 16 MB partition table
+# (sdkconfig.muse's), not the 8 MB one sdkconfig.hub sets for the sticks. The
+# path is from hub/, the project root.
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="third_party/muse-gadget-sdk/esp32/partitions_muse.csv"

@@ -2,31 +2,32 @@
 
 [日本語](README.md) | English
 
-Talk to Muse from Even Realities G2 glasses, through an M5Stack StickS3 running as a Muse Gadget.
-A question asked to the G2's Even AI (a custom agent) goes to Muse as a typed turn on the StickS3, and the reply comes back to the G2's HUD. No PC is needed.
+Talk to Muse from Even Realities G2 glasses, through a Gadget (an M5Stack device running as a Muse Gadget).
+A question asked to the G2's Even AI (a custom agent) goes to Muse as a typed turn on the Gadget, and the reply comes back to the G2's HUD. No PC is needed.
 
 ```
 G2 "Hey Even …" → Even app on the iPhone (speech-to-text in Even's cloud)
-   ─http://muse-hub.local:8787/v1/chat/completions─▶ StickS3 (on the iPhone's Personal Hotspot over Wi-Fi)
+   ─http://muse-hub.local:8787/v1/chat/completions─▶ Gadget (on the iPhone's Personal Hotspot over Wi-Fi)
    ─typed turn─▶ Muse ─reply text─▶ G2 HUD
 ```
 
 | dir | contents |
 |---|---|
-| `hub/` | Muse Gadget firmware for the StickS3 (ESP-IDF). Serves the Even AI endpoint on the LAN |
-| `relay/` | The same on a Mac (talks to the StickS3 over USB). See the appendix |
+| `hub/` | Firmware for the Gadget (ESP-IDF). Serves the Even AI endpoint on the LAN |
+| `relay/` | The same on a Mac (talks to the Gadget over USB). See the appendix |
 
 The paging keywords and the notes the hub adds to replies are Japanese (the project is used in Japanese); see "Usage"
 and "Localizing the keywords and notes".
 
 ## Requirements
 
-- M5Stack StickS3, Even Realities G2, an iPhone (Even app and Muse app)
+- An M5Stack device for the Gadget: **StickS3**, **StickC Plus2** or **StopWatch** (see "Supported devices" for the differences)
+- Even Realities G2, an iPhone (Even app and Muse app)
 - ESP-IDF **v6.0.3** (the only version the Muse Gadget SDK supports)
 - A [Muse SDK token](https://gadgets.muse.ai/settings/sdk-tokens)
 - A token for Even AI (a random string of 32+ characters you make yourself)
 
-## Building and flashing the StickS3 (hub)
+## Building and flashing the Gadget (hub)
 
 ```sh
 git clone --recursive https://github.com/GOB52/EvenG2-Muse-Hub-M5.git  # existing clone: git submodule update --init
@@ -37,10 +38,14 @@ $EDITOR hub/sdkconfig.local
 
 hub/tools/build.sh build
 hub/tools/build.sh flash-monitor /dev/cu.usbmodemXXXX
+
+# for other devices than the StickS3 add BOARD (cplus2 for the StickC Plus2, stopwatch for the StopWatch; it builds in hub/build-<board>)
+BOARD=cplus2 hub/tools/build.sh build
+BOARD=cplus2 hub/tools/build.sh flash-monitor /dev/cu.usbserial-XXXX
 ```
 
-After changing `hub/sdkconfig.hub` or `hub/sdkconfig.local` (including pulling a change to `sdkconfig.hub`),
-delete `hub/build-sticks3/sdkconfig` and rebuild (sdkconfig defaults only seed a new sdkconfig).
+After changing `hub/sdkconfig.hub`, `hub/sdkconfig.hub-<board>` or `hub/sdkconfig.local` (including pulling a change),
+delete `hub/build-<board>/sdkconfig` and rebuild (sdkconfig defaults only seed a new sdkconfig).
 
 ### Tokens
 
@@ -66,14 +71,14 @@ CONFIG_HUB_RELAY_TOKEN="<the random string made above>"
 ```
 
 - `hub/sdkconfig.local` and `relay/.env` are git-ignored. Write the values in an editor (typed into a shell or an AI chat, they stay in its history).
-- If one leaks, make a new one, put it in every place above, delete `hub/build-sticks3/sdkconfig` and rebuild.
+- If one leaks, make a new one, put it in every place above, delete `hub/build-<board>/sdkconfig` and rebuild.
 
 ## Setup
 
-1. **iPhone Personal Hotspot**: Settings → Personal Hotspot, turn **Maximize Compatibility on** (the StickS3 is 2.4 GHz only).
-   Keep the hotspot screen open while pairing (with no device connected the hotspot stops, and the StickS3 logs `reason=201`).
+1. **iPhone Personal Hotspot**: Settings → Personal Hotspot, turn **Maximize Compatibility on** (the Gadget is 2.4 GHz only).
+   Keep the hotspot screen open while pairing (with no device connected the hotspot stops, and the Gadget logs `reason=201`).
 2. **Pairing**: in the Muse app, Settings > Devices, turn on Developer mode and add `MuseGadget-XXXXXX` with Add Device.
-   Choose the iPhone's hotspot for Wi-Fi. To change Wi-Fi: unlink in the app → hold the StickS3's button for 5 s → add it again.
+   Choose the iPhone's hotspot for Wi-Fi. To change Wi-Fi: unlink in the app → reset the Gadget's pairing (on the StickS3, hold its button for 5 s) → add it again.
    **After replacing the SDK token**, pair again once flashed: the boot log shows `setup=advertising` (not connected to Muse,
    waiting to pair), so unlink the old link in the app → add it again with Add Device (no long press needed). The relay token has
    nothing to do with pairing (just set the Even app's API Key to the same value).
@@ -86,7 +91,7 @@ CONFIG_HUB_RELAY_TOKEN="<the random string made above>"
 
 ## Usage
 
-Say "Hey Even" to the G2. Muse's reply shows as text on the HUD (the G2 gets text; when you talk on the StickS3, the reply's voice also plays on the StickS3).
+Say "Hey Even" to the G2. Muse's reply shows as text on the HUD (the G2 gets text; when you talk on the Gadget, the reply's voice also plays on the Gadget).
 
 - **25-second wait**: Even AI gives up after about 30 s, so if the reply isn't complete in 25 s, the hub returns what has arrived and
   "(まだ考え中です。「続き」と話しかけると続きを返します)" ("still thinking; say 続き for the rest"). The reply is kept and returned on 「続き」 (dropped after 10 minutes).
@@ -104,18 +109,18 @@ Say "Hey Even" to the G2. Muse's reply shows as text on the HUD (the G2 gets tex
 - **Widgets**: a list in Muse's reply becomes "title + ・item — description", a map "description + ・place — time etc.".
   What can't be text (image choices, HTML widgets, tap-to-reply buttons) becomes "(Muse アプリに表示: …)" ("shown in the Muse app").
 - **Empty replies**: a reply with only links or images (no text or widgets) gives "(Muse の返事にテキストがありませんでした。…)".
-- **Side chat** (with `CONFIG_HUB_SIDE_CHAT=y`): the StickS3's turns (from the G2 and spoken on the StickS3) go to one Muse side chat
+- **Side chat** (with `CONFIG_HUB_SIDE_CHAT=y`): the Gadget's turns (from the G2 and spoken on the Gadget) go to one Muse side chat
   instead of the main chat, and replies are read from it. The G2's conversation stays apart in the Muse app and is never mixed up with
   an answer to a question typed in the main chat at the same time. The default is the main chat (as before).
   - Write `CONFIG_HUB_SIDE_CHAT=y` in `hub/sdkconfig.local`. To use a particular side chat, also write
     `CONFIG_HUB_SIDE_CHAT_ID="<UUID>"` (ask Muse and it tells you the ID of an existing side chat; a lowercase UUID).
     Without it, the hub makes one on first boot and keeps it in NVS (a full flash erase makes a new one).
-  - After changing it, delete `hub/build-sticks3/sdkconfig` and rebuild. The boot log shows `side chat: <ID>` and
+  - After changing it, delete `hub/build-<board>/sdkconfig` and rebuild. The boot log shows `side chat: <ID>` and
     `chat subscription: side chat <ID>`.
   - A side chat that doesn't exist yet is created by the first message. If that first reply is over before the subscription is reopened,
     it is missed (the G2 shows "still thinking"); ask again.
-- While a voice turn runs on the StickS3 (while its front button is held), typed turns are refused.
-- The StickS3 alone talks to Muse too: hold the front button and speak (Japanese captions on screen, `CONFIG_MUSE_CJK_FONT`).
+- While a voice turn runs on the Gadget (while its front button is held), typed turns are refused.
+- The Gadget alone talks to Muse too: hold the front button and speak (Japanese captions on screen, `CONFIG_MUSE_CJK_FONT`).
 
 Settings (override them in `hub/sdkconfig.local`):
 
@@ -127,7 +132,7 @@ Settings (override them in `hub/sdkconfig.local`):
 | `CONFIG_HUB_WAIT_S` | 25 | seconds to wait for a reply |
 | `CONFIG_HUB_MAX_CHARS` | 2000 | characters per page |
 | `CONFIG_HUB_ALL_MAX_CHARS` | 5000 | characters returned at once for 「終わりまで」 |
-| `CONFIG_HUB_SIDE_CHAT` | n | `y` sends the StickS3's turns to a Muse side chat |
+| `CONFIG_HUB_SIDE_CHAT` | n | `y` sends the Gadget's turns to a Muse side chat |
 | `CONFIG_HUB_SIDE_CHAT_ID` | (empty) | the side chat's UUID. Empty: make one and keep it in NVS |
 
 ## Localizing the keywords and notes
@@ -139,13 +144,56 @@ to use another language, change them in both the hub and the relay so the two ke
 |---|---|---|
 | Paging keywords: next page (「続き」…), all the rest (「終わりまで」…), and the endings allowed after them (を / を見せて …) | `PAGE_CONTINUE_WORDS`, `PAGE_ALL_WORDS`, `PAGE_KEY_SUFFIXES` in `hub/components/hub/hub_proto.c` | the same names in `relay/muse_relay/turns.py` |
 | Notes added to replies: still thinking, next page, expired, empty reply | `HUB_CONTINUE_NOTE`, `HUB_PAGE_NOTE`, `HUB_EXPIRED_NOTE`, `HUB_EMPTY_NOTE` in `hub/components/hub/hub_turns.c` | `CONTINUE_NOTE`, `PAGE_NOTE`, `EXPIRED_NOTE`, `EMPTY_NOTE` in `relay/muse_relay/turns.py` |
-| Error replies: a turn is running, voice turn on the StickS3, Muse not set up, could not reach Muse | `HUB_STILL_WORKING`, `HUB_MSG_BUSY`, `HUB_MSG_NOT_SET_UP`, `HUB_MSG_INTERNAL` and the `Muse に届きませんでした (…)` format in `hub_turns.c` | `STILL_WORKING`, `MSG_INTERNAL` and the error replies in `turns.py` |
+| Error replies: a turn is running, voice turn on the Gadget, Muse not set up, could not reach Muse | `HUB_STILL_WORKING`, `HUB_MSG_BUSY`, `HUB_MSG_NOT_SET_UP`, `HUB_MSG_INTERNAL` and the `Muse に届きませんでした (…)` format in `hub_turns.c` | `STILL_WORKING`, `MSG_INTERNAL` and the error replies in `turns.py` |
 | Widgets that can't be text: "(Muse アプリに表示: …)" ("shown in the Muse app") | `HUB_UNKNOWN_WIDGET`, `SHOWN_HEAD` in `hub_proto.c` | `UNKNOWN_WIDGET`, `SHOWN_HEAD` in `relay/muse_relay/widgets.py` |
 
 - Keywords are matched after removing the characters in `PAGE_KEY_IGNORED` (punctuation and spaces), as a whole utterance (keyword, or keyword + ending), so a new language needs
   its own list of endings ("please", "show me" …) and a check that ordinary questions starting with those words aren't taken as paging.
 - The host tests (`hub/test/host/test_hub.c`, `test_turns.c`) and the relay's tests (`relay/tests/`) check these strings; update them too.
 - Page cutting prefers to break after the strings in `PAGE_BREAKS` (。！？ and line feeds, in `hub_proto.c`); for other languages add `. `, `! `, `? ` (the relay's `PAGE_BREAKS` is in `relay/muse_relay/openai_api.py`).
+
+## Your own avatar
+
+The avatar on the Gadget's screen can be your own. The default one is the SDK's Jollybot (Meta's character, not covered by
+Apache-2.0: don't change it and hand it out).
+
+1. Make an avatar renderer, `muse_pixel.c`: a C file that draws a 64x64 pixel-art character for each state (boot, idle,
+   listening, thinking, speaking, error, off, and happy when you pet it). The SDK's `tools/muse/AVATAR_RECIPE.md` says how,
+   and `tools/muse/avatar_prompt.md` what it has to keep (the API, the palette, each state's movement, under 10 ms a frame).
+   Muse can draw it for you. Plug in a StickS3 or StopWatch with the hub firmware (the StickC Plus2 can't chat with Muse over
+   USB) and, in `hub/third_party/muse-gadget-sdk/esp32`:
+
+   ```sh
+   python3 tools/muse/avatar.py --no-flash --port /dev/cu.usbmodemXXXX
+   python3 tools/muse/avatar.py --no-flash --port /dev/cu.usbmodemXXXX --edit "what to change"
+   ```
+
+   - Always pass `--no-flash`, and never `--board`: otherwise it flashes the SDK's firmware over the hub.
+   - The file lands in the SDK's `components/muse/avatar/muse_pixel.c`, with a GIF per state in `components/muse/avatar/gifs/`.
+   - It needs pyserial and Pillow. It builds the SDK's firmware once to check the file, so point `IDF_EXPORT` at ESP-IDF's `export.sh`.
+2. Put it in `hub/avatar/muse_pixel.c` (git-ignored).
+3. Build and flash with `AVATAR=project`. It builds in `hub/build-<board>-avatar`, beside the default avatar's build.
+
+   ```sh
+   BOARD=stopwatch AVATAR=project hub/tools/build.sh build
+   BOARD=stopwatch AVATAR=project hub/tools/build.sh flash /dev/cu.usbmodemXXXX
+   ```
+
+   Without `AVATAR` you get the default avatar. `AVATAR=project` adds `hub/sdkconfig.avatar` (`CONFIG_MUSE_AVATAR_FROM_PROJECT=y`, patch 0005).
+   The avatar's static buffers are in PSRAM (`CONFIG_MUSE_STATIC_BUFFERS_IN_PSRAM`), so it may draw a little slower.
+
+## Supported devices
+
+| Device | `BOARD` | Chip / PSRAM | Port | Differences |
+|---|---|---|---|---|
+| M5Stack StickS3 | `sticks3` (default) | ESP32-S3 / 8 MB | `/dev/cu.usbmodem*` | |
+| M5Stack StickC Plus2 | `cplus2` | ESP32 / 2 MB | `/dev/cu.usbserial-*` | Flashed at 230400 baud (its USB-UART bridge drops out above that). Muse speaks through a buzzer, so replies are quiet |
+| M5Stack StopWatch | `stopwatch` | ESP32-S3 / 8 MB | `/dev/cu.usbmodem*` | 16 MB of flash (`hub/sdkconfig.hub-stopwatch` picks the 16 MB partition table) |
+
+- All of them reset when their serial port opens.
+- The StickC Plus2 has 2 MB of PSRAM, so the voice session's buffers are made smaller (`CONFIG_MUSE_HATCH_COMPACT_BUFFERS=y`
+  in `hub/sdkconfig.hub-cplus2`). Without it the typed turns can't connect (`connect failed: Out of memory`).
+- With more than one powered on, their mDNS names (`muse-hub.local`) clash. Use one at a time, or change `CONFIG_HUB_MDNS_NAME`.
 
 ## For developers
 
@@ -157,15 +205,23 @@ to use another language, change them in both the hub and the relay so the two ke
   - `0004`: adds `muse_hatch_set_session_id()`. When set, `session_id` goes into the bodies of `/chat/stream` and `/chat/subscribe`
     (and of voice notes) to use the side chat. If it doesn't exist yet (the subscription gets 404), the connection stays and the
     subscription reopens after the first message's ack. Setting it while connected is refused.
+  - `0005`: adds `CONFIG_MUSE_AVATAR_FROM_PROJECT`. When on, the project's (`hub/`) `avatar/muse_pixel.c` is built in place of the
+    default avatar (the build stops if the file is missing). `build.sh`'s `AVATAR=project` turns it on.
 - **hub component** (`hub/components/hub/`): `hub_proto` (request parsing, responses, UTF-8, pages, keywords),
   `hub_turns` (turns, holding, paging), `hub_http` (esp_http_server), `hub_side_chat` (the side chat ID), `hub_main` (startup, mDNS).
-- **Internal RAM**: the StickS3 has little internal RAM (about 18K free in steady state). The hub's task stacks and per-request buffers are in PSRAM
-  (`hub_mem.h`), and the HTTP server and mDNS start once Muse has been connected for 5 s (setup leaves the RAM to the SDK).
+- **Internal RAM**: the SDK sends `link.register` and the tunnel's keepalives only with 16 KB of DMA-capable internal RAM free
+  (short of it the tunnel doesn't open, or closes after 65 s). So what only the CPU touches is in PSRAM:
+  - the hub's task stacks and per-request buffers (`hub_mem.h`);
+  - the avatar's and audio's static buffers (`CONFIG_MUSE_STATIC_BUFFERS_IN_PSRAM=y`; the avatar may draw a little slower);
+  - mDNS's statics (`hub/components/hub/linker.lf`) and run-time blocks (`hub/sdkconfig.hub`), and what the HTTP server and mDNS take as they start (`hub_main.c`).
+  - The HTTP server and mDNS start once Muse has been connected for 5 s (setup leaves the RAM to the SDK).
+  - Free in steady state (internal / DMA): StickS3 about 42K / 35K, StickC Plus2 about 57K / 42K, StopWatch about 42K / 35K.
+    The StickC Plus2 has 2 MB of PSRAM, so its PSRAM is the shortest (about 350K free).
 - **Host tests** (pure code and turn handling, the Mac's cc with ASan/UBSan): `hub/test/host/run.sh` (build the hub once first to fetch cJSON).
 - **Even AI's requests**: the POST comes from **the Even app on the iPhone itself** (`User-Agent: EvenCore/1.0`), in OpenAI chat completions form
   without `stream`, with only the latest utterance in `messages`. Saving the agent sends a `GET` probe (the hub answers 200).
 - **Typed chat over USB** (an SDK tool; run in a shell with ESP-IDF activated, pyserial is in IDF's Python environment).
-  Close `monitor` / `flash-monitor` first. The StickS3 resets when its serial port opens.
+  Close `monitor` / `flash-monitor` first. The Gadget resets when its serial port opens.
 
   ```sh
   python hub/third_party/muse-gadget-sdk/esp32/tools/muse/chat.py --port /dev/cu.usbmodemXXXX "question"
@@ -174,15 +230,15 @@ to use another language, change them in both the hub and the relay so the two ke
 
 ## Appendix: the relay on a Mac (USB)
 
-`relay/` is a Python version of the hub that runs on a Mac. It talks to the StickS3 over USB and hands turns over with the SDK's `chat.py`.
+`relay/` is a Python version of the hub that runs on a Mac. It talks to the Gadget over USB (tried on the StickS3) and hands turns over with the SDK's `chat.py`.
 Use it to:
 
 - try changes to how replies are handled without reflashing (edit the Python and run it).
-- serve Even when the iPhone and the StickS3 can't share a network (publish the Mac with Tailscale Funnel or on a tailnet).
+- serve Even when the iPhone and the Gadget can't share a network (publish the Mac with Tailscale Funnel or on a tailnet).
 - tell problems apart (the hub's HTTP side or Muse's).
 
 ```
-G2 "Hey Even …" → Even app ─POST /v1/chat/completions─▶ relay (Mac) ─USB─▶ StickS3 ─▶ Muse
+G2 "Hey Even …" → Even app ─POST /v1/chat/completions─▶ relay (Mac) ─USB─▶ Gadget ─▶ Muse
 ```
 
 ```sh
@@ -199,7 +255,7 @@ Even's Endpoint is `http://<Mac's LAN IP>:8787/v1/chat/completions` on the LAN, 
 
 - Replies are handled as in "Usage" (25-second wait, pages, keywords, expiry, empty replies). The page length and the 「終わりまで」 limit
   are the constants `MAX_CHARS` / `ALL_MAX_CHARS` in `relay/muse_relay/openai_api.py`.
-- Starting the relay opens the serial port, so the StickS3 resets once. A StickS3 with the hub firmware works as it is.
+- Starting the relay opens the serial port, so the Gadget resets once. A Gadget with the hub firmware works as it is.
 - Funnel is a public URL and bots will come. Requests without the token are answered 401 / 404 without reading the body. Stop it when done with
   `tailscale funnel --https=443 off`.
 - `--capture` saves incoming requests to `relay/captures/` (authentication headers masked).
@@ -211,7 +267,7 @@ Even's Endpoint is `http://<Mac's LAN IP>:8787/v1/chat/completions` on the LAN, 
 [facebookincubator/muse-gadget-sdk](https://github.com/facebookincubator/muse-gadget-sdk), Apache-2.0).
 `hub/CMakeLists.txt` includes the SDK's `esp32/cmake/project.cmake` and uses the SDK's `main` and `components` as they are.
 sdkconfig layers the SDK's `sdkconfig.defaults` → `devices/sdkconfig.muse` →
-`devices/sdkconfig.muse-m5stack-sticks3` → `hub/sdkconfig.hub` → `hub/sdkconfig.local`.
+`devices/sdkconfig.muse-m5stack-<device>` → `hub/sdkconfig.hub` → `hub/sdkconfig.hub-<board>` (if any) → `hub/sdkconfig.avatar` (with `AVATAR=project`) → `hub/sdkconfig.local`.
 
 The firmware version is `999.0.0+hub.<hub version>` (e.g. `999.0.0+hub.0.0.1`, `PROJECT_VER` in `hub/CMakeLists.txt`).
 OTA is on for Muse boards and installs only an image whose `MAJOR.MINOR.PATCH` is newer, so the SDK's `999.0.0` stays in front

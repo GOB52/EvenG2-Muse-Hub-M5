@@ -22,3 +22,6 @@ relay/.venv/
 relay/.env
 relay/captures/
 .pytest_cache/
+
+# Your own avatar (CONFIG_MUSE_AVATAR_FROM_PROJECT): kept on your machine
+hub/avatar/muse_pixel.c
