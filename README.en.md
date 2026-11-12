@@ -152,6 +152,36 @@ to use another language, change them in both the hub and the relay so the two ke
 - The host tests (`hub/test/host/test_hub.c`, `test_turns.c`) and the relay's tests (`relay/tests/`) check these strings; update them too.
 - Page cutting prefers to break after the strings in `PAGE_BREAKS` (。！？ and line feeds, in `hub_proto.c`); for other languages add `. `, `! `, `? ` (the relay's `PAGE_BREAKS` is in `relay/muse_relay/openai_api.py`).
 
+## Your own avatar
+
+The avatar on the Gadget's screen can be your own. The default one is the SDK's Jollybot (Meta's character, not covered by
+Apache-2.0: don't change it and hand it out).
+
+1. Make an avatar renderer, `muse_pixel.c`: a C file that draws a 64x64 pixel-art character for each state (boot, idle,
+   listening, thinking, speaking, error, off, and happy when you pet it). The SDK's `tools/muse/AVATAR_RECIPE.md` says how,
+   and `tools/muse/avatar_prompt.md` what it has to keep (the API, the palette, each state's movement, under 10 ms a frame).
+   Muse can draw it for you. Plug in a StickS3 or StopWatch with the hub firmware (the StickC Plus2 can't chat with Muse over
+   USB) and, in `hub/third_party/muse-gadget-sdk/esp32`:
+
+   ```sh
+   python3 tools/muse/avatar.py --no-flash --port /dev/cu.usbmodemXXXX
+   python3 tools/muse/avatar.py --no-flash --port /dev/cu.usbmodemXXXX --edit "what to change"
+   ```
+
+   - Always pass `--no-flash`, and never `--board`: otherwise it flashes the SDK's firmware over the hub.
+   - The file lands in the SDK's `components/muse/avatar/muse_pixel.c`, with a GIF per state in `components/muse/avatar/gifs/`.
+   - It needs pyserial and Pillow. It builds the SDK's firmware once to check the file, so point `IDF_EXPORT` at ESP-IDF's `export.sh`.
+2. Put it in `hub/avatar/muse_pixel.c` (git-ignored).
+3. Build and flash with `AVATAR=project`. It builds in `hub/build-<board>-avatar`, beside the default avatar's build.
+
+   ```sh
+   BOARD=stopwatch AVATAR=project hub/tools/build.sh build
+   BOARD=stopwatch AVATAR=project hub/tools/build.sh flash /dev/cu.usbmodemXXXX
+   ```
+
+   Without `AVATAR` you get the default avatar. `AVATAR=project` adds `hub/sdkconfig.avatar` (`CONFIG_MUSE_AVATAR_FROM_PROJECT=y`, patch 0005).
+   The avatar's static buffers are in PSRAM (`CONFIG_MUSE_STATIC_BUFFERS_IN_PSRAM`), so it may draw a little slower.
+
 ## Supported devices
 
 | Device | `BOARD` | Chip / PSRAM | Port | Differences |
@@ -175,6 +205,8 @@ to use another language, change them in both the hub and the relay so the two ke
   - `0004`: adds `muse_hatch_set_session_id()`. When set, `session_id` goes into the bodies of `/chat/stream` and `/chat/subscribe`
     (and of voice notes) to use the side chat. If it doesn't exist yet (the subscription gets 404), the connection stays and the
     subscription reopens after the first message's ack. Setting it while connected is refused.
+  - `0005`: adds `CONFIG_MUSE_AVATAR_FROM_PROJECT`. When on, the project's (`hub/`) `avatar/muse_pixel.c` is built in place of the
+    default avatar (the build stops if the file is missing). `build.sh`'s `AVATAR=project` turns it on.
 - **hub component** (`hub/components/hub/`): `hub_proto` (request parsing, responses, UTF-8, pages, keywords),
   `hub_turns` (turns, holding, paging), `hub_http` (esp_http_server), `hub_side_chat` (the side chat ID), `hub_main` (startup, mDNS).
 - **Internal RAM**: the SDK sends `link.register` and the tunnel's keepalives only with 16 KB of DMA-capable internal RAM free
@@ -235,7 +267,7 @@ Even's Endpoint is `http://<Mac's LAN IP>:8787/v1/chat/completions` on the LAN, 
 [facebookincubator/muse-gadget-sdk](https://github.com/facebookincubator/muse-gadget-sdk), Apache-2.0).
 `hub/CMakeLists.txt` includes the SDK's `esp32/cmake/project.cmake` and uses the SDK's `main` and `components` as they are.
 sdkconfig layers the SDK's `sdkconfig.defaults` → `devices/sdkconfig.muse` →
-`devices/sdkconfig.muse-m5stack-<device>` → `hub/sdkconfig.hub` → `hub/sdkconfig.hub-<board>` (if any) → `hub/sdkconfig.local`.
+`devices/sdkconfig.muse-m5stack-<device>` → `hub/sdkconfig.hub` → `hub/sdkconfig.hub-<board>` (if any) → `hub/sdkconfig.avatar` (with `AVATAR=project`) → `hub/sdkconfig.local`.
 
 The firmware version is `999.0.0+hub.<hub version>` (e.g. `999.0.0+hub.0.0.1`, `PROJECT_VER` in `hub/CMakeLists.txt`).
 OTA is on for Muse boards and installs only an image whose `MAJOR.MINOR.PATCH` is newer, so the SDK's `999.0.0` stays in front

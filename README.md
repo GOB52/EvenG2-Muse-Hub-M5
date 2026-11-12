@@ -132,6 +132,36 @@ G2 で「Hey Even」と話しかける。返事は Muse から、テキストで
 | `CONFIG_HUB_SIDE_CHAT` | n | `y` で Gadget の会話を Muse の side chat に送る |
 | `CONFIG_HUB_SIDE_CHAT_ID` | (空) | side chat の UUID。空なら作って NVS に保存 |
 
+## オリジナルのアバター
+
+Gadget の画面のアバターは、自分のものに替えられる。既定のアバターは SDK の Jollybot (Meta のキャラクターで、
+Apache-2.0 の対象外。改変して配らない)。
+
+1. アバターの描画プログラム `muse_pixel.c` を作る。64×64 のドット絵を状態 (boot・idle・listening・thinking・speaking・
+   error・off と、なでたときの happy) ごとに描く C ファイル。作り方は SDK の `tools/muse/AVATAR_RECIPE.md`、
+   守ること (API・パレット・各状態の動き・1 フレーム 10 ms 未満) は `tools/muse/avatar_prompt.md`。
+   Muse に頼んで作らせられる。hub のファームが入った StickS3 か StopWatch をつなぎ (StickC Plus2 は USB で Muse と会話できない)、
+   `hub/third_party/muse-gadget-sdk/esp32` で:
+
+   ```sh
+   python3 tools/muse/avatar.py --no-flash --port /dev/cu.usbmodemXXXX
+   python3 tools/muse/avatar.py --no-flash --port /dev/cu.usbmodemXXXX --edit "変えたいところ"
+   ```
+
+   - `--no-flash` を必ず付け、`--board` は付けない (付けないと SDK のファームが書き込まれ、hub が消える)。
+   - できたファイルは SDK の `components/muse/avatar/muse_pixel.c`、状態ごとの GIF は `components/muse/avatar/gifs/`。
+   - pyserial と Pillow が要る。確認のため SDK のファームを一度ビルドするので、ESP-IDF の `export.sh` を `IDF_EXPORT` で指定する。
+2. それを `hub/avatar/muse_pixel.c` に置く (git の対象外)。
+3. `AVATAR=project` を付けてビルドと書き込みをする。ビルド先は `hub/build-<board>-avatar` で、既定のアバターのビルドと並べて残る。
+
+   ```sh
+   BOARD=stopwatch AVATAR=project hub/tools/build.sh build
+   BOARD=stopwatch AVATAR=project hub/tools/build.sh flash /dev/cu.usbmodemXXXX
+   ```
+
+   `AVATAR` を付けなければ既定のアバター。`AVATAR=project` は `hub/sdkconfig.avatar` (`CONFIG_MUSE_AVATAR_FROM_PROJECT=y`、パッチ 0005) を重ねる。
+   アバターの静的バッファは PSRAM にある (`CONFIG_MUSE_STATIC_BUFFERS_IN_PSRAM`) ので、描画は少し遅くなりうる。
+
 ## 対応デバイス
 
 | デバイス | `BOARD` | チップ / PSRAM | ポート | 違い |
@@ -155,6 +185,8 @@ G2 で「Hey Even」と話しかける。返事は Muse から、テキストで
   - `0004`: `muse_hatch_set_session_id()` を足す。設定すると `/chat/stream` と `/chat/subscribe` の本文に `session_id` を入れて
     side chat を使う (音声ノートの本文にも)。未作成 (受信が 404) なら接続を切らず、最初のメッセージの ack の後に受信を開き直す。
     接続中の設定は受け付けない。
+  - `0005`: `CONFIG_MUSE_AVATAR_FROM_PROJECT` を足す。オンならプロジェクト (`hub/`) の `avatar/muse_pixel.c` を既定のアバターの代わりに
+    ビルドする (ファイルが無ければビルドを止める)。`build.sh` の `AVATAR=project` がオンにする。
 - **hub component** (`hub/components/hub/`): `hub_proto` (リクエスト解釈・応答生成・UTF-8・ページ分割・言葉の判定)、
   `hub_turns` (ターン管理・保持・ページ送り)、`hub_http` (esp_http_server)、`hub_side_chat` (side chat の ID)、`hub_main` (起動・mDNS)。
 - **内部 RAM**: SDK は DMA に使える内部 RAM が 16 KB 以上空いているときだけ `link.register` とトンネルの keepalive を送る
@@ -215,7 +247,7 @@ Even 側の Endpoint は、LAN なら `http://<Mac の LAN IP>:8787/v1/chat/comp
 [facebookincubator/muse-gadget-sdk](https://github.com/facebookincubator/muse-gadget-sdk)、Apache-2.0)。
 `hub/CMakeLists.txt` が SDK の `esp32/cmake/project.cmake` を取り込み、SDK の `main` と `components`
 をそのまま使う。sdkconfig は SDK の `sdkconfig.defaults` → `devices/sdkconfig.muse` →
-`devices/sdkconfig.muse-m5stack-<デバイス>` → `hub/sdkconfig.hub` → `hub/sdkconfig.hub-<board>` (あれば) → `hub/sdkconfig.local` の順に重ねる。
+`devices/sdkconfig.muse-m5stack-<デバイス>` → `hub/sdkconfig.hub` → `hub/sdkconfig.hub-<board>` (あれば) → `hub/sdkconfig.avatar` (`AVATAR=project` のとき) → `hub/sdkconfig.local` の順に重ねる。
 
 ファームのバージョンは `999.0.0+hub.<hub のバージョン>` (例: `999.0.0+hub.0.0.1`、`hub/CMakeLists.txt` の `PROJECT_VER`)。
 Muse のボードは OTA が有効で、`MAJOR.MINOR.PATCH` が新しいイメージだけを入れるため、SDK と同じ `999.0.0` を前に残して

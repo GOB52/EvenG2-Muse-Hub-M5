@@ -1,0 +1,4 @@
+# Applied with AVATAR=project (see tools/build.sh), after sdkconfig.hub and
+# sdkconfig.hub-<board>: builds hub/avatar/muse_pixel.c, your own avatar, in
+# place of the SDK's default one (patch 0005).
+CONFIG_MUSE_AVATAR_FROM_PROJECT=y
