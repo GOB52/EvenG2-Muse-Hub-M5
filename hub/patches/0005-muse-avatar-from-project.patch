@@ -1,0 +1,48 @@
+diff --git a/esp32/components/muse/CMakeLists.txt b/esp32/components/muse/CMakeLists.txt
+index 5c89865..2c10ae0 100644
+--- a/esp32/components/muse/CMakeLists.txt
++++ b/esp32/components/muse/CMakeLists.txt
+@@ -72,8 +72,18 @@ if(CONFIG_MUSE_ENABLED)
+     # Your own character (tools/muse/AVATAR_RECIPE.md) stands in for the default
+     # avatar when avatar/muse_pixel.c exists here; this avatar/ is gitignored. The
+     # default is in avatar/ at the top of the project.
++    # CONFIG_MUSE_AVATAR_FROM_PROJECT picks the project's own avatar/muse_pixel.c
++    # (the directory idf.py builds, -C), ahead of both.
+     file(GLOB custom_avatar CONFIGURE_DEPENDS "${COMPONENT_DIR}/avatar/muse_pixel.c")
+-    if(custom_avatar)
++    idf_build_get_property(project_dir PROJECT_DIR)
++    if(CONFIG_MUSE_AVATAR_FROM_PROJECT)
++        set(project_avatar "${project_dir}/avatar/muse_pixel.c")
++        if(NOT EXISTS "${project_avatar}")
++            message(FATAL_ERROR "CONFIG_MUSE_AVATAR_FROM_PROJECT is on, but ${project_avatar} doesn't exist")
++        endif()
++        message(STATUS "Project avatar: ${project_avatar}")
++        list(APPEND srcs "${project_avatar}")
++    elseif(custom_avatar)
+         message(STATUS "Custom avatar: components/muse/avatar/muse_pixel.c")
+         list(APPEND srcs "avatar/muse_pixel.c")
+     else()
+diff --git a/esp32/components/muse/Kconfig b/esp32/components/muse/Kconfig
+index 70c6710..0098a86 100644
+--- a/esp32/components/muse/Kconfig
++++ b/esp32/components/muse/Kconfig
+@@ -402,6 +402,19 @@ menu "Muse"
+             to pay for the CPU's light-sleep retention memory, which it
+             takes at boot and keeps.
+ 
++    config MUSE_AVATAR_FROM_PROJECT
++        bool "Build the project's own avatar"
++        depends on MUSE_ENABLED
++        default n
++        help
++            Builds avatar/muse_pixel.c from the project directory (the one
++            idf.py builds) in place of the avatar the SDK would pick: the
++            default one in avatar/ at the top of the SDK, or yours in
++            components/muse/avatar/ (tools/muse/AVATAR_RECIPE.md). Lets a
++            project that builds this SDK from outside keep its avatar with
++            its own code, and switch between it and the default. The build
++            stops if the file is missing.
++
+     config MUSE_SMALL_FULL_REPLY
+         bool "Full-screen replies on small screens"
+         depends on MUSE_ENABLED
