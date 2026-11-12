@@ -138,7 +138,7 @@ G2 で「Hey Even」と話しかける。返事は Muse から、テキストで
 |---|---|---|---|---|
 | M5Stack StickS3 | `sticks3` (既定) | ESP32-S3 / 8 MB | `/dev/cu.usbmodem*` | |
 | M5Stack StickC Plus2 | `cplus2` | ESP32 / 2 MB | `/dev/cu.usbserial-*` | 書き込みは 230400 baud (USB-UART が速いと途切れる)。返事の音声はブザーなので小さい |
-| M5Stack StopWatch | `stopwatch` | ESP32-S3 / 8 MB | `/dev/cu.usbmodem*` | フラッシュ 16 MB (`hub/sdkconfig.hub-stopwatch` で 16 MB のパーティション表)。内部 RAM が最も厳しい |
+| M5Stack StopWatch | `stopwatch` | ESP32-S3 / 8 MB | `/dev/cu.usbmodem*` | フラッシュ 16 MB (`hub/sdkconfig.hub-stopwatch` で 16 MB のパーティション表) |
 
 - どれもシリアルポートを開くとリセットされる。
 - StickC Plus2 は PSRAM が 2 MB なので、音声セッションのバッファを小さくする (`hub/sdkconfig.hub-cplus2` の
@@ -157,8 +157,14 @@ G2 で「Hey Even」と話しかける。返事は Muse から、テキストで
     接続中の設定は受け付けない。
 - **hub component** (`hub/components/hub/`): `hub_proto` (リクエスト解釈・応答生成・UTF-8・ページ分割・言葉の判定)、
   `hub_turns` (ターン管理・保持・ページ送り)、`hub_http` (esp_http_server)、`hub_side_chat` (side chat の ID)、`hub_main` (起動・mDNS)。
-- **内部 RAM**: Gadget は内部 RAM が少ない (定常で StickS3 は約 18K、StickC Plus2 は約 35K、StopWatch は約 20K 空き)。hub のタスクのスタックとリクエストごとのバッファは PSRAM に置き
-  (`hub_mem.h`)、HTTP サーバと mDNS は Muse への接続が 5 秒続いてから起動する (セットアップ中は SDK に譲る)。
+- **内部 RAM**: SDK は DMA に使える内部 RAM が 16 KB 以上空いているときだけ `link.register` とトンネルの keepalive を送る
+  (足りないとトンネルが開かない、または 65 秒で閉じる)。そのため CPU しか触らないものは PSRAM に置く。
+  - hub のタスクのスタックとリクエストごとのバッファ (`hub_mem.h`)。
+  - アバターと音声の静的バッファ (`CONFIG_MUSE_STATIC_BUFFERS_IN_PSRAM=y`。アバターの描画が少し遅くなりうる)。
+  - mDNS の静的領域 (`hub/components/hub/linker.lf`) と実行中の確保 (`hub/sdkconfig.hub`)、HTTP サーバと mDNS の起動時の確保 (`hub_main.c`)。
+  - HTTP サーバと mDNS は Muse への接続が 5 秒続いてから起動する (セットアップ中は SDK に譲る)。
+  - 定常の空き (内部 / DMA): StickS3 約 42K / 35K、StickC Plus2 約 57K / 42K、StopWatch 約 42K / 35K。
+    StickC Plus2 は PSRAM が 2 MB なので、PSRAM の空きが約 350K と最も少ない。
 - **ホストテスト** (純粋処理とターン管理、Mac の cc + ASan/UBSan): `hub/test/host/run.sh` (一度 hub をビルドして cJSON を取得しておく)。
 - **Even AI のリクエスト**: POST は **iPhone の Even アプリ自身** (`User-Agent: EvenCore/1.0`) から届く。OpenAI chat completions 形式で
   `stream` なし、`messages` は最新の発話 1 つだけ。保存時に `GET` で確認が来る (hub は 200 を返す)。

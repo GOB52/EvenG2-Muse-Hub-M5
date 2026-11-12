@@ -158,7 +158,7 @@ to use another language, change them in both the hub and the relay so the two ke
 |---|---|---|---|---|
 | M5Stack StickS3 | `sticks3` (default) | ESP32-S3 / 8 MB | `/dev/cu.usbmodem*` | |
 | M5Stack StickC Plus2 | `cplus2` | ESP32 / 2 MB | `/dev/cu.usbserial-*` | Flashed at 230400 baud (its USB-UART bridge drops out above that). Muse speaks through a buzzer, so replies are quiet |
-| M5Stack StopWatch | `stopwatch` | ESP32-S3 / 8 MB | `/dev/cu.usbmodem*` | 16 MB of flash (`hub/sdkconfig.hub-stopwatch` picks the 16 MB partition table). The tightest internal RAM |
+| M5Stack StopWatch | `stopwatch` | ESP32-S3 / 8 MB | `/dev/cu.usbmodem*` | 16 MB of flash (`hub/sdkconfig.hub-stopwatch` picks the 16 MB partition table) |
 
 - All of them reset when their serial port opens.
 - The StickC Plus2 has 2 MB of PSRAM, so the voice session's buffers are made smaller (`CONFIG_MUSE_HATCH_COMPACT_BUFFERS=y`
@@ -177,8 +177,14 @@ to use another language, change them in both the hub and the relay so the two ke
     subscription reopens after the first message's ack. Setting it while connected is refused.
 - **hub component** (`hub/components/hub/`): `hub_proto` (request parsing, responses, UTF-8, pages, keywords),
   `hub_turns` (turns, holding, paging), `hub_http` (esp_http_server), `hub_side_chat` (the side chat ID), `hub_main` (startup, mDNS).
-- **Internal RAM**: the Gadget has little internal RAM (in steady state about 18K free on the StickS3, about 35K on the StickC Plus2, about 20K on the StopWatch). The hub's task stacks and per-request buffers are in PSRAM
-  (`hub_mem.h`), and the HTTP server and mDNS start once Muse has been connected for 5 s (setup leaves the RAM to the SDK).
+- **Internal RAM**: the SDK sends `link.register` and the tunnel's keepalives only with 16 KB of DMA-capable internal RAM free
+  (short of it the tunnel doesn't open, or closes after 65 s). So what only the CPU touches is in PSRAM:
+  - the hub's task stacks and per-request buffers (`hub_mem.h`);
+  - the avatar's and audio's static buffers (`CONFIG_MUSE_STATIC_BUFFERS_IN_PSRAM=y`; the avatar may draw a little slower);
+  - mDNS's statics (`hub/components/hub/linker.lf`) and run-time blocks (`hub/sdkconfig.hub`), and what the HTTP server and mDNS take as they start (`hub_main.c`).
+  - The HTTP server and mDNS start once Muse has been connected for 5 s (setup leaves the RAM to the SDK).
+  - Free in steady state (internal / DMA): StickS3 about 42K / 35K, StickC Plus2 about 57K / 42K, StopWatch about 42K / 35K.
+    The StickC Plus2 has 2 MB of PSRAM, so its PSRAM is the shortest (about 350K free).
 - **Host tests** (pure code and turn handling, the Mac's cc with ASan/UBSan): `hub/test/host/run.sh` (build the hub once first to fetch cJSON).
 - **Even AI's requests**: the POST comes from **the Even app on the iPhone itself** (`User-Agent: EvenCore/1.0`), in OpenAI chat completions form
   without `stream`, with only the latest utterance in `messages`. Saving the agent sends a `GET` probe (the hub answers 200).

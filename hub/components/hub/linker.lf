@@ -1,0 +1,10 @@
+# mDNS's zero-initialized statics (about 2 KB) in PSRAM, for the SDK's internal
+# RAM (see sdkconfig.hub). Needs CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY,
+# which every device's SDK overlay sets.
+# mdns_service.c stays internal: it holds the mDNS task's static TCB, which
+# must be in internal RAM (xTaskCreateStatic asserts otherwise).
+[mapping:hub_mdns_extram]
+archive: libespressif__mdns.a
+entries:
+    * (extram_bss)
+    mdns_service (default)

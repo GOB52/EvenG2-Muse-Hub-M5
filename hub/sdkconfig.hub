@@ -1,5 +1,5 @@
-# Applied after the SDK's sdkconfig.defaults, devices/sdkconfig.muse and
-# devices/sdkconfig.muse-m5stack-sticks3 (see tools/build.sh).
+# Applied after the SDK's sdkconfig.defaults, devices/sdkconfig.muse and the
+# device's devices/sdkconfig.muse-m5stack-<device> (see tools/build.sh).
 #
 # Paths in sdkconfig are relative to the project directory (hub/), so point the
 # SDK's project-relative files at the submodule.
@@ -14,3 +14,20 @@ CONFIG_MUSE_CJK_FONT_NOTO=n
 
 # The hub's mDNS task stack in PSRAM: the SDK's own tasks need the internal RAM.
 CONFIG_MDNS_TASK_CREATE_FROM_SPIRAM=y
+
+# Internal RAM: the SDK sends link.register and the tunnel's keepalive pings
+# only with 16 KB of DMA-capable RAM free. On the StopWatch the hub's few KB
+# left less than that: the tunnel didn't open on some boots, or closed after
+# 65 s idle. Keep what only the CPU touches in PSRAM (linker.lf in
+# components/hub also moves mDNS's statics; hub_main.c starts the server and
+# mDNS with small blocks in PSRAM).
+# The avatar renderer's and audio path's statics, about 17 KB (the Watcher
+# does the same). The avatar may draw a little slower.
+CONFIG_MUSE_STATIC_BUFFERS_IN_PSRAM=y
+# mDNS's run-time blocks, and none of its unused parts.
+CONFIG_MDNS_MEMORY_ALLOC_SPIRAM=y
+CONFIG_MDNS_ENABLE_CONSOLE_CLI=n
+CONFIG_MDNS_ENABLE_BROWSE=n
+CONFIG_MDNS_PREDEF_NETIF_AP=n
+CONFIG_MDNS_PREDEF_NETIF_ETH=n
+CONFIG_MDNS_MULTIPLE_INSTANCE=n
